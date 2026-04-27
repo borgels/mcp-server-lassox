@@ -1,4 +1,4 @@
-# Lassox MCP
+# mcp-server-lassox
 
 TypeScript MCP server for the Lassox CVR API. It gives agents named tools for core CVR lookup and search, so they do not need to build Lassox API URLs directly.
 
@@ -37,7 +37,7 @@ Use the stdio server for local agent clients:
   "mcpServers": {
     "lassox": {
       "command": "node",
-      "args": ["/absolute/path/to/lassox/dist/stdio.js"],
+      "args": ["/absolute/path/to/mcp-server-lassox/dist/stdio.js"],
       "env": {
         "LASSO_API_KEY": "your-api-key"
       }
@@ -53,7 +53,7 @@ During development, you can point the command at `npm`:
   "mcpServers": {
     "lassox": {
       "command": "npm",
-      "args": ["run", "dev", "--prefix", "/absolute/path/to/lassox"],
+      "args": ["run", "dev", "--prefix", "/absolute/path/to/mcp-server-lassox"],
       "env": {
         "LASSO_API_KEY": "your-api-key"
       }
