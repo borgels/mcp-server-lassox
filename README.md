@@ -2,6 +2,8 @@
 
 TypeScript MCP server for the Lassox CVR API. It gives agents named tools for core CVR lookup and search, so they do not need to build Lassox API URLs directly.
 
+> **Disclaimer:** This is an independent, unofficial project. It is not affiliated with, endorsed by, or supported by Lasso X. "Lassox" / "Lasso X" and the CVR API are referenced only to describe what this server talks to. You need your own Lassox API key, and use of the Lassox API is subject to Lassox's own terms.
+
 ## Scope
 
 This first version covers the core CVR API only:
