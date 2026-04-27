@@ -39,5 +39,5 @@ transport for non-stdio clients.
   never accepted as a tool argument.
 - No request or response bodies are logged by the server.
 
-[Unreleased]: https://github.com/Borgels/lassox/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/Borgels/lassox/releases/tag/v0.1.0
+[Unreleased]: https://github.com/Borgels/mcp-server-lassox/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Borgels/mcp-server-lassox/releases/tag/v0.1.0
