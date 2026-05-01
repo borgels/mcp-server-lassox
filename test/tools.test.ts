@@ -1,0 +1,122 @@
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { searchCapabilities } from '../src/lasso/capabilities.js';
+import { LassoClient } from '../src/lasso/client.js';
+import { checkToolPolicy } from '../src/lasso/policy.js';
+import { registerCvrTools } from '../src/tools/cvr.js';
+
+const originalAuditLog = process.env.LASSO_AUDIT_LOG;
+let tempDir: string | undefined;
+
+describe('Lassox tool hardening', () => {
+  afterEach(async () => {
+    if (originalAuditLog === undefined) {
+      delete process.env.LASSO_AUDIT_LOG;
+    } else {
+      process.env.LASSO_AUDIT_LOG = originalAuditLog;
+    }
+
+    if (tempDir) {
+      await rm(tempDir, { recursive: true, force: true });
+      tempDir = undefined;
+    }
+  });
+
+  it('registers discovery and read-only annotations for every tool', () => {
+    const registered = captureRegisteredTools();
+
+    expect(Object.keys(registered)).toEqual([
+      'lassox_search_capabilities',
+      'cvr_search',
+      'cvr_get_entity',
+      'cvr_get_entity_history',
+      'cvr_get_related',
+    ]);
+
+    for (const tool of Object.values(registered)) {
+      expect(tool.config.annotations).toEqual({
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+      });
+    }
+  });
+
+  it('searches capability metadata for MCP clients', () => {
+    const results = searchCapabilities('history');
+
+    expect(results.map(result => result.id)).toContain('cvr_get_entity_history');
+    expect(results[0]?.examples.length).toBeGreaterThan(0);
+  });
+
+  it('keeps the policy allowlist read-only', () => {
+    expect(checkToolPolicy('cvr_search')).toMatchObject({ allowed: true });
+    expect(checkToolPolicy('cvr_delete_entity')).toMatchObject({ allowed: false });
+  });
+
+  it('audits tool calls without writing raw targets or secrets', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'lassox-audit-'));
+    const auditPath = join(tempDir, 'audit.jsonl');
+    process.env.LASSO_AUDIT_LOG = auditPath;
+    const registered = captureRegisteredTools();
+
+    const discoveryTool = registered.lassox_search_capabilities;
+    if (!discoveryTool) {
+      throw new Error('lassox_search_capabilities was not registered');
+    }
+
+    await discoveryTool.handler({ query: 'company', limit: 5 });
+
+    const auditText = await readFile(auditPath, 'utf8');
+    const records = auditText
+      .trim()
+      .split('\n')
+      .map(line => JSON.parse(line) as Record<string, unknown>);
+
+    expect(records).toHaveLength(2);
+    expect(records[0]).toMatchObject({
+      tool: 'lassox_search_capabilities',
+      action: 'start',
+    });
+    expect(records[1]).toMatchObject({
+      tool: 'lassox_search_capabilities',
+      action: 'finish',
+      status: 'ok',
+    });
+    expect(auditText).not.toContain('company');
+    expect(auditText).not.toContain('lasso-api-key');
+  });
+});
+
+function captureRegisteredTools(): Record<
+  string,
+  {
+    config: { annotations?: unknown };
+    handler: (input: Record<string, unknown>) => Promise<unknown>;
+  }
+> {
+  const registered: Record<
+    string,
+    {
+      config: { annotations?: unknown };
+      handler: (input: Record<string, unknown>) => Promise<unknown>;
+    }
+  > = {};
+  const server = {
+    registerTool: vi.fn((name: string, config: { annotations?: unknown }, handler) => {
+      registered[name] = { config, handler };
+    }),
+  };
+  const client = new LassoClient({
+    apiKey: 'test-key',
+    baseUrl: 'https://example.test',
+    fetchImpl: vi.fn() as unknown as typeof fetch,
+  });
+
+  registerCvrTools(server as never, client);
+
+  return registered;
+}
