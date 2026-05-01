@@ -1,8 +1,18 @@
-import { describe, expect, it, vi } from 'vitest';
-import { LassoHttpError } from '../src/errors.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { formatUnknownError, LassoHttpError, redactSecrets } from '../src/errors.js';
 import { LassoClient } from '../src/lasso/client.js';
 
+const originalTimeout = process.env.LASSO_TIMEOUT_MS;
+
 describe('LassoClient', () => {
+  afterEach(() => {
+    if (originalTimeout === undefined) {
+      delete process.env.LASSO_TIMEOUT_MS;
+    } else {
+      process.env.LASSO_TIMEOUT_MS = originalTimeout;
+    }
+  });
+
   it('sends the Lassox API key as a header', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse({ lassoId: 'CVR-1-34580820' }));
     const client = new LassoClient({
@@ -79,6 +89,29 @@ describe('LassoClient', () => {
     });
 
     await expect(client.get('/CVR-1-34580820')).rejects.toThrow(/upstream unavailable/);
+  });
+
+  it('redacts API key material from formatted errors', async () => {
+    expect(redactSecrets('lasso-api-key: secret-test-key')).toBe('lasso-api-key: [REDACTED]');
+    expect(formatUnknownError(new Error('LASSO_API_KEY=secret-test-key'))).toBe(
+      'LASSO_API_KEY= [REDACTED]',
+    );
+  });
+
+  it('uses LASSO_TIMEOUT_MS when timeout is not passed explicitly', async () => {
+    process.env.LASSO_TIMEOUT_MS = '1234';
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+    const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse({ ok: true }));
+    const client = new LassoClient({
+      apiKey: 'test-key',
+      baseUrl: 'https://example.test',
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    await client.get('/CVR-1-34580820');
+
+    expect(timeoutSpy).toHaveBeenCalledWith(1234);
+    timeoutSpy.mockRestore();
   });
 
   it('fails clearly when LASSO_API_KEY is missing', async () => {

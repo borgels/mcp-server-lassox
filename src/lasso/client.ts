@@ -21,7 +21,7 @@ export class LassoClient {
       options.baseUrl ?? process.env.LASSO_BASE_URL ?? 'https://api.lassox.com',
     );
     this.fetchImpl = options.fetchImpl ?? fetch;
-    this.timeoutMs = options.timeoutMs ?? 30_000;
+    this.timeoutMs = options.timeoutMs ?? Number(process.env.LASSO_TIMEOUT_MS ?? 30_000);
   }
 
   async get<T>(path: string, query?: Record<string, QueryValue>): Promise<T> {

@@ -7,6 +7,11 @@ export interface LassoErrorPayload {
   helpLink?: string;
 }
 
+const SECRET_PATTERNS = [
+  /lasso-api-key:\s*[^,\s}]+/gi,
+  /(apiKey|LASSO_API_KEY)["']?\s*[:=]\s*["']?[^"',\s}]+/gi,
+];
+
 export class LassoHttpError extends Error {
   readonly status: number;
   readonly url: string;
@@ -23,7 +28,7 @@ export class LassoHttpError extends Error {
     super(formatLassoHttpError(input));
     this.name = 'LassoHttpError';
     this.status = input.status;
-    this.url = input.url;
+    this.url = redactSecrets(input.url);
     this.payload = input.payload;
     this.retryAfter = input.retryAfter;
   }
@@ -31,10 +36,22 @@ export class LassoHttpError extends Error {
 
 export function formatUnknownError(error: unknown): string {
   if (error instanceof Error) {
-    return error.message;
+    return redactSecrets(error.message);
   }
 
-  return String(error);
+  return redactSecrets(String(error));
+}
+
+export function redactSecrets(value: string): string {
+  return SECRET_PATTERNS.reduce(
+    (current, pattern) =>
+      current.replace(pattern, match => {
+        const separator = match.includes(':') ? ':' : '=';
+        const key = match.split(separator)[0]?.trim() ?? 'secret';
+        return `${key}${separator} [REDACTED]`;
+      }),
+    value,
+  );
 }
 
 function formatLassoHttpError(input: {
@@ -55,7 +72,7 @@ function formatLassoHttpError(input: {
     input.fallbackMessage,
   ].filter(Boolean);
 
-  return parts.join(' | ');
+  return redactSecrets(parts.join(' | '));
 }
 
 function isLassoErrorPayload(value: unknown): value is LassoErrorPayload {

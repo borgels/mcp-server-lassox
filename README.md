@@ -30,6 +30,13 @@ Set your Lassox API key in the MCP server environment. The server sends it as th
 export LASSO_API_KEY="your-api-key"
 ```
 
+Optional hardening settings:
+
+```sh
+export LASSO_TIMEOUT_MS=30000
+export LASSO_AUDIT_LOG="/absolute/path/to/lassox-audit.jsonl"
+```
+
 ## Cursor Or Claude Config
 
 Use the stdio server for local agent clients:
@@ -41,7 +48,8 @@ Use the stdio server for local agent clients:
       "command": "node",
       "args": ["/absolute/path/to/mcp-server-lassox/dist/stdio.js"],
       "env": {
-        "LASSO_API_KEY": "your-api-key"
+        "LASSO_API_KEY": "your-api-key",
+        "LASSO_TIMEOUT_MS": "30000"
       }
     }
   }
@@ -57,14 +65,40 @@ During development, you can point the command at `npm`:
       "command": "npm",
       "args": ["run", "dev", "--prefix", "/absolute/path/to/mcp-server-lassox"],
       "env": {
-        "LASSO_API_KEY": "your-api-key"
+        "LASSO_API_KEY": "your-api-key",
+        "LASSO_AUDIT_LOG": "/absolute/path/to/lassox-audit.jsonl"
       }
     }
   }
 }
 ```
 
+## Start Here
+
+Use `lassox_search_capabilities` first when an MCP client needs to decide which CVR tool to call. It returns tool descriptions, examples, identifier formats, and safety notes without calling Lassox.
+
+```json
+{
+  "query": "company history",
+  "limit": 5
+}
+```
+
 ## Tools
+
+All tools are read-only and registered with MCP tool annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, and `openWorldHint`) so clients can reason about safety.
+
+### `lassox_search_capabilities`
+
+Search the server's CVR capabilities.
+
+Example:
+
+```json
+{
+  "query": "related person"
+}
+```
 
 ### `cvr_search`
 
@@ -167,3 +201,11 @@ LASSO_API_KEY="your-api-key" npm run smoke:live
 ## Rate Limits
 
 Lassox documents a limit of 500 requests per minute per API key. If Lassox returns `429`, this server includes the `retry-after` value in the tool error message.
+
+## Security And Audit
+
+- `LASSO_API_KEY` is read only from the MCP server environment.
+- API keys are never accepted as tool arguments.
+- Error formatting redacts `lasso-api-key`, `LASSO_API_KEY`, and `apiKey`-style secret material.
+- The server exposes only read-only CVR tools. A small policy module keeps that invariant explicit for future expansion.
+- If `LASSO_AUDIT_LOG` is set, each tool call writes JSONL audit events with timestamp, request id, tool name, action, target hash, status, and redacted error text. Raw search/entity inputs and API keys are not written to the audit log.
