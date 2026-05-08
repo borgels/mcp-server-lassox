@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `cvr_get_reports` tool — fetch annual report key figures (nøgletal) for a
+  Danish company via Lassox `GET /{lassoId}/reports`. Accepts an optional ISO
+  4217 `currency` code for Lassox currency conversion. Restricted to company
+  Lasso IDs (`CVR-1-*`).
+- `lassox_financial_analysis` tool — run the Lassox Financial Analysis
+  (Regnskabsanalyse) Module API via `POST /modules/reportanalysis/{lassoId}`.
+  Returns HTML-formatted textual analysis plus the latest and previous reports.
+  May require a separate Lassox subscription. Restricted to company Lasso IDs.
+- `cvr_get_network` tool — fetch a person's professional network via the
+  Lassox Network Module API (`GET /modules/network/{lassoId}`). Restricted to
+  person Lasso IDs (`CVR-3-*`). May require a separate subscription.
+- `cvr_get_ownership_graph` tool — build ownership and voting-rights graphs
+  via the Lassox Ownership Structure Module API
+  (`POST /modules/relations/graph`). Supports `relationTypes`, `enrichments`
+  (`companyinfo`, `personinfo`, `reports`, `ultimateOwners`), and depth
+  controls (capped at 25 ids and depth 0–10 to keep responses bounded). May
+  require a separate subscription.
+- `creditsafe_get_rating` tool — fetch Creditsafe ratings for Danish companies
+  via Lassox (`GET /data/creditsafe/rating/{cvr}`). Accepts either a raw 8-digit
+  CVR or a `CVR-1-*` Lasso ID, plus optional `skipCache`.
+- `teledata_get_company_phones` tool — fetch phone numbers registered to a
+  Danish company (`GET /data/teledata/{lassoId}/phonenumbers`). Restricted to
+  company Lasso IDs.
+- `teledata_lookup_phone` tool — reverse-lookup a Danish phone number
+  (`GET /data/teledata/{phoneNumber}`). Optional `includeCompany` enriches
+  with CVR data when the number belongs to a company.
+- `LassoClient.post()` for Lassox Module APIs, sharing the existing auth,
+  timeout, and error-mapping with `get()`.
+
+### Security
+
+- `LassoClient` now refuses non-`https://` base URLs (loopback `http://` is
+  allowed for local mocks) so the Lassox API key cannot accidentally be sent
+  over plain HTTP via a misconfigured `LASSO_BASE_URL`.
+
+### Changed
+
+- README scope section now lists every supported Lassox API surface, including
+  the new network, ownership-graph, Creditsafe, and Teledata tools.
+
 ## [0.1.1] - 2026-05-01
 
 Hardening release for the Lassox CVR MCP server. This release keeps the v0.1.0

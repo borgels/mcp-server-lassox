@@ -10,7 +10,11 @@ import {
   getRelatedEntities,
   searchCvr,
 } from '../lasso/cvr.js';
+import { getCreditsafeRating } from '../lasso/creditsafe.js';
+import { getCvrReports, getFinancialAnalysis } from '../lasso/financials.js';
+import { getCvrNetwork, getOwnershipGraph } from '../lasso/network.js';
 import { checkToolPolicy } from '../lasso/policy.js';
+import { getCompanyPhoneNumbers, lookupPhoneNumber } from '../lasso/teledata.js';
 
 const entityInputShape = {
   lassoId: z
@@ -27,6 +31,26 @@ const entityInputSchema = z
   .refine(input => Boolean(input.lassoId) || (Boolean(input.entityType) && input.id !== undefined), {
     message: 'Provide either lassoId or both entityType and id.',
   });
+
+const companyEntityInputShape = {
+  lassoId: z
+    .string()
+    .trim()
+    .regex(/^CVR-1-\d+$/, 'Use a CVR company Lasso ID like CVR-1-34580820.')
+    .optional(),
+  entityType: z.literal('company').optional(),
+  id: z.union([z.string().trim().min(1), z.number().int().positive()]).optional(),
+};
+
+const personEntityInputShape = {
+  lassoId: z
+    .string()
+    .trim()
+    .regex(/^CVR-3-\d+$/, 'Use a CVR person Lasso ID like CVR-3-4004094652.')
+    .optional(),
+  entityType: z.literal('person').optional(),
+  id: z.union([z.string().trim().min(1), z.number().int().positive()]).optional(),
+};
 
 const searchFiltersSchema = z
   .object({
@@ -119,6 +143,160 @@ export function registerCvrTools(server: McpServer, client: LassoClient): void {
   );
 
   server.registerTool(
+    'cvr_get_reports',
+    {
+      title: 'Get CVR Reports (Key Figures / Nøgletal)',
+      description:
+        'Fetch Lassox annual report key figures (nøgletal) for a Danish company. Returns Lassox JSON converted from XBRL with metadata, balance-sheet items, EBITDA, employees, auditors, and optional group reports. Provide either a CVR-1 Lasso ID or entityType="company" with the CVR id. Optional ISO 4217 currency code requests Lassox currency conversion.',
+      inputSchema: {
+        ...companyEntityInputShape,
+        currency: z
+          .string()
+          .trim()
+          .regex(/^[A-Z]{3}$/, 'Use an ISO 4217 currency code such as DKK, EUR, or USD.')
+          .optional()
+          .describe('Optional ISO 4217 currency code for Lassox currency conversion.'),
+      },
+      annotations: TOOL_ANNOTATIONS,
+    },
+    async input =>
+      runAuditedTool('cvr_get_reports', input, async () =>
+        jsonToolResult(await getCvrReports(client, input)),
+      ),
+  );
+
+  server.registerTool(
+    'lassox_financial_analysis',
+    {
+      title: 'Get Lassox Financial Analysis',
+      description:
+        'Run the Lassox Financial Analysis (Regnskabsanalyse) module on a Danish company. Returns a textual analysis (HTML-formatted, e.g. <br/>, <ul>) covering gross profit, EBITDA, balance sheet, working capital, and credit policy, plus the latest and previous reports. This is a Lassox Module API and may require a separate subscription on your Lassox account.',
+      inputSchema: companyEntityInputShape,
+      annotations: TOOL_ANNOTATIONS,
+    },
+    async input =>
+      runAuditedTool('lassox_financial_analysis', input, async () =>
+        jsonToolResult(await getFinancialAnalysis(client, input)),
+      ),
+  );
+
+  server.registerTool(
+    'cvr_get_network',
+    {
+      title: 'Get CVR Person Network',
+      description:
+        'Fetch a person\'s professional network from Lassox: every company the person has been connected to, current roles, and time-overlapping relations with other people. Provide either a CVR-3 Lasso ID or entityType="person" with the person id. Lassox Module API; may require a separate subscription.',
+      inputSchema: personEntityInputShape,
+      annotations: TOOL_ANNOTATIONS,
+    },
+    async input =>
+      runAuditedTool('cvr_get_network', input, async () =>
+        jsonToolResult(await getCvrNetwork(client, input)),
+      ),
+  );
+
+  server.registerTool(
+    'cvr_get_ownership_graph',
+    {
+      title: 'Get CVR Ownership / Voting Graph',
+      description:
+        'Build an ownership and voting-rights graph for one or more Danish entities (companies and/or persons). Returns relations (with percentage ranges) and entities (with optional enrichment such as company info, person info, financial reports, and ultimate owner calculations). Lassox Module API; may require a separate subscription. Higher depth values traverse more edges and increase response size — start small.',
+      inputSchema: {
+        ids: z
+          .array(z.string().trim().regex(/^CVR-[123]-\d+$/, 'Each id must be a Lasso ID like CVR-1-34580820.'))
+          .min(1)
+          .max(25)
+          .describe('Lasso IDs to seed the graph from. CVR-1, CVR-2, or CVR-3 prefixes.'),
+        relationTypes: z
+          .array(z.enum(['ownership', 'votingrights', 'unknownOwnership']))
+          .min(1)
+          .default(['ownership']),
+        enrichments: z
+          .array(z.enum(['companyinfo', 'personinfo', 'reports', 'ultimateOwners']))
+          .optional(),
+        ingoingDepth: z.number().int().min(0).max(10).optional(),
+        outgoingDepth: z.number().int().min(0).max(10).optional(),
+        onDate: z
+          .string()
+          .trim()
+          .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use ISO 8601 date format YYYY-MM-DD.')
+          .optional()
+          .describe('Optional historical snapshot date.'),
+      },
+      annotations: TOOL_ANNOTATIONS,
+    },
+    async input =>
+      runAuditedTool('cvr_get_ownership_graph', input, async () =>
+        jsonToolResult(await getOwnershipGraph(client, input)),
+      ),
+  );
+
+  server.registerTool(
+    'creditsafe_get_rating',
+    {
+      title: 'Get Creditsafe Rating',
+      description:
+        'Fetch the Creditsafe credit rating for a Danish company via Lassox. Returns current and previous international + local scores, descriptions, credit max, currency, and a PDF link. Lassox caches Creditsafe results for 24 hours; set skipCache=true to force a fresh upstream call (may incur extra cost).',
+      inputSchema: {
+        cvr: z
+          .union([
+            z.string().trim().regex(/^\d{8}$/, 'CVR must be 8 digits.'),
+            z.number().int().min(10000000).max(99999999),
+          ])
+          .optional(),
+        lassoId: z
+          .string()
+          .trim()
+          .regex(/^CVR-1-\d+$/, 'Use a CVR company Lasso ID like CVR-1-34580820.')
+          .optional(),
+        skipCache: z.boolean().default(false),
+      },
+      annotations: TOOL_ANNOTATIONS,
+    },
+    async input =>
+      runAuditedTool('creditsafe_get_rating', input, async () =>
+        jsonToolResult(await getCreditsafeRating(client, input)),
+      ),
+  );
+
+  server.registerTool(
+    'teledata_get_company_phones',
+    {
+      title: 'Get Company Phone Numbers (Teledata)',
+      description:
+        'Fetch phone numbers registered to a Danish company via the Lassox Teledata data API. Returns each phone number with supplier, registration timestamps, and consent flags. Provide either a CVR-1 Lasso ID or entityType="company" with the CVR id.',
+      inputSchema: companyEntityInputShape,
+      annotations: TOOL_ANNOTATIONS,
+    },
+    async input =>
+      runAuditedTool('teledata_get_company_phones', input, async () =>
+        jsonToolResult(await getCompanyPhoneNumbers(client, input)),
+      ),
+  );
+
+  server.registerTool(
+    'teledata_lookup_phone',
+    {
+      title: 'Lookup Phone Number Owner (Teledata)',
+      description:
+        'Reverse-lookup a Danish phone number via Lassox Teledata. Returns subscriber name, address, supplier, and protection codes. Set includeCompany=true to enrich with CVR data when the number belongs to a company.',
+      inputSchema: {
+        phoneNumber: z
+          .string()
+          .trim()
+          .min(6)
+          .describe('Phone number, 6-15 digits, optional + prefix. Spaces, dashes, and parentheses are stripped.'),
+        includeCompany: z.boolean().default(false),
+      },
+      annotations: TOOL_ANNOTATIONS,
+    },
+    async input =>
+      runAuditedTool('teledata_lookup_phone', input, async () =>
+        jsonToolResult(await lookupPhoneNumber(client, input)),
+      ),
+  );
+
+  server.registerTool(
     'cvr_get_related',
     {
       title: 'Get Related CVR Entities',
@@ -184,6 +362,17 @@ function auditTarget(input: unknown): unknown {
     query: value.query,
     type: value.type,
     status: value.status,
+    currency: value.currency,
+    cvr: value.cvr,
+    skipCache: value.skipCache,
+    phoneNumber: value.phoneNumber,
+    includeCompany: value.includeCompany,
+    ids: value.ids,
+    relationTypes: value.relationTypes,
+    enrichments: value.enrichments,
+    ingoingDepth: value.ingoingDepth,
+    outgoingDepth: value.outgoingDepth,
+    onDate: value.onDate,
   };
 }
 

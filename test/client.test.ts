@@ -123,6 +123,86 @@ describe('LassoClient', () => {
 
     await expect(client.get('/CVR-1-34580820')).rejects.toThrow('Missing LASSO_API_KEY');
   });
+
+  it('refuses non-https base URLs to protect the API key', () => {
+    expect(
+      () =>
+        new LassoClient({
+          apiKey: 'test-key',
+          baseUrl: 'http://api.lassox.com',
+          fetchImpl: vi.fn() as unknown as typeof fetch,
+        }),
+    ).toThrow(/https/);
+  });
+
+  it('allows http:// for loopback (test mocks)', () => {
+    expect(
+      () =>
+        new LassoClient({
+          apiKey: 'test-key',
+          baseUrl: 'http://localhost:8080',
+          fetchImpl: vi.fn() as unknown as typeof fetch,
+        }),
+    ).not.toThrow();
+  });
+
+  it('issues POST requests without a body or content-type by default', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse({ ok: true }));
+    const client = new LassoClient({
+      apiKey: 'test-key',
+      baseUrl: 'https://example.test',
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    await client.post('/modules/reportanalysis/CVR-1-34580820');
+
+    const init = fetchMock.mock.calls[0]?.[1];
+    expect(init?.method).toBe('POST');
+    expect(init?.body).toBeUndefined();
+    expect(init?.headers).toMatchObject({
+      Accept: 'application/json',
+      'lasso-api-key': 'test-key',
+    });
+    expect((init?.headers as Record<string, string>)['Content-Type']).toBeUndefined();
+  });
+
+  it('serializes JSON bodies for POST requests', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse({ ok: true }));
+    const client = new LassoClient({
+      apiKey: 'test-key',
+      baseUrl: 'https://example.test',
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    await client.post('/modules/example', undefined, { hello: 'world' });
+
+    const init = fetchMock.mock.calls[0]?.[1];
+    expect(init?.body).toBe('{"hello":"world"}');
+    expect(init?.headers).toMatchObject({
+      'Content-Type': 'application/json',
+    });
+  });
+
+  it('maps POST errors through LassoHttpError like GET', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      jsonResponse(
+        {
+          errorMessage: 'subscription required',
+          errorCode: 12,
+        },
+        402,
+      ),
+    );
+    const client = new LassoClient({
+      apiKey: 'test-key',
+      baseUrl: 'https://example.test',
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    await expect(client.post('/modules/reportanalysis/CVR-1-34580820')).rejects.toBeInstanceOf(
+      LassoHttpError,
+    );
+  });
 });
 
 function jsonResponse(payload: unknown, status = 200, headers: Record<string, string> = {}): Response {
