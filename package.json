@@ -1,6 +1,6 @@
 {
   "name": "mcp-server-lassox",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "MCP server for the Lassox CVR API.",
   "type": "module",
   "main": "./dist/stdio.js",
@@ -36,6 +36,10 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "zod": "^4.3.6"
+  },
+  "overrides": {
+    "ip-address": ">=10.1.1",
+    "hono": ">=4.12.16"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
