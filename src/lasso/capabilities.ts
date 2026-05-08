@@ -72,6 +72,152 @@ export const LASSO_CAPABILITIES: LassoCapability[] = [
     safetyNotes: ['Read-only. Unsupported relation combinations are rejected before calling Lassox.'],
     keywords: ['related', 'relation', 'person', 'place', 'production unit'],
   },
+  {
+    id: 'cvr_get_reports',
+    title: 'Get CVR Reports (Key Figures / Nøgletal)',
+    description:
+      'Fetch annual report key figures (nøgletal) for a Danish company, converted by Lassox from XBRL.',
+    risk: 'read',
+    examples: [
+      { entityType: 'company', id: '34580820' },
+      { lassoId: 'CVR-1-34580820', currency: 'EUR' },
+    ],
+    identifierFormats: ['CVR-1-{cvr}'],
+    safetyNotes: [
+      'Read-only. Only company Lasso IDs (CVR-1-*) are accepted.',
+      'Optional ISO 4217 currency code triggers Lassox currency conversion.',
+    ],
+    keywords: [
+      'reports',
+      'nøgletal',
+      'key figures',
+      'finance',
+      'financial',
+      'xbrl',
+      'annual report',
+      'regnskab',
+      'ebitda',
+    ],
+  },
+  {
+    id: 'cvr_get_network',
+    title: 'Get CVR Person Network',
+    description:
+      'Fetch a person\'s professional network from Lassox: connected companies, current roles, and time-overlapping relations with other people.',
+    risk: 'read',
+    examples: [
+      { entityType: 'person', id: '4004094652' },
+      { lassoId: 'CVR-3-4004094652' },
+    ],
+    identifierFormats: ['CVR-3-{personId}'],
+    safetyNotes: [
+      'Read-only. Only person Lasso IDs (CVR-3-*) are accepted.',
+      'Lassox Module API. May require a separate subscription.',
+    ],
+    keywords: ['network', 'netværk', 'person', 'roles', 'connections', 'professional'],
+  },
+  {
+    id: 'cvr_get_ownership_graph',
+    title: 'Get CVR Ownership / Voting Graph',
+    description:
+      'Build an ownership and voting-rights graph for one or more entities, with optional enrichment (company info, person info, financial reports, ultimate owners).',
+    risk: 'read',
+    examples: [
+      {
+        ids: ['CVR-1-34580820'],
+        relationTypes: ['ownership'],
+        enrichments: ['companyinfo', 'ultimateOwners'],
+        outgoingDepth: 2,
+      },
+    ],
+    identifierFormats: ['CVR-1-{cvr}', 'CVR-2-{pNumber}', 'CVR-3-{personId}'],
+    safetyNotes: [
+      'Read-only. Lassox Module API; may require a separate subscription.',
+      'Higher depth values traverse more edges and increase response size — start small.',
+      'Up to 25 seed ids and depth 0-10 are accepted.',
+    ],
+    keywords: [
+      'ownership',
+      'ejerstruktur',
+      'voting',
+      'votingrights',
+      'ubo',
+      'ultimate owners',
+      'beneficial',
+      'graph',
+      'shareholders',
+    ],
+  },
+  {
+    id: 'creditsafe_get_rating',
+    title: 'Get Creditsafe Rating',
+    description:
+      'Fetch the Creditsafe credit rating for a Danish company via Lassox. Returns current and previous scores, descriptions, credit max, currency, and a PDF link.',
+    risk: 'read',
+    examples: [
+      { cvr: '34580820' },
+      { lassoId: 'CVR-1-34580820', skipCache: true },
+    ],
+    identifierFormats: ['8-digit CVR', 'CVR-1-{cvr}'],
+    safetyNotes: [
+      'Read-only. Lassox caches Creditsafe responses for 24 hours.',
+      'skipCache=true forces a fresh upstream call and may incur extra cost.',
+    ],
+    keywords: ['creditsafe', 'credit', 'rating', 'kredit', 'score', 'risk', 'due diligence'],
+  },
+  {
+    id: 'teledata_get_company_phones',
+    title: 'Get Company Phone Numbers (Teledata)',
+    description: 'Fetch phone numbers registered to a Danish company via the Lassox Teledata API.',
+    risk: 'read',
+    examples: [{ entityType: 'company', id: '34580820' }, { lassoId: 'CVR-1-34580820' }],
+    identifierFormats: ['CVR-1-{cvr}'],
+    safetyNotes: ['Read-only. Only company Lasso IDs are accepted.'],
+    keywords: ['teledata', 'phone', 'phonenumbers', 'telefon', 'numbers', 'subscriber'],
+  },
+  {
+    id: 'teledata_lookup_phone',
+    title: 'Lookup Phone Number Owner (Teledata)',
+    description:
+      'Reverse-lookup a Danish phone number via Lassox Teledata. Returns subscriber name, address, supplier, and protection codes.',
+    risk: 'read',
+    examples: [
+      { phoneNumber: '70201020' },
+      { phoneNumber: '+4570201020', includeCompany: true },
+    ],
+    identifierFormats: ['6-15 digit phone number, optional + prefix'],
+    safetyNotes: [
+      'Read-only. Returns publicly-registered subscriber data; respect Danish privacy rules.',
+      'Set includeCompany=true to enrich with CVR data when the number belongs to a company.',
+    ],
+    keywords: ['teledata', 'phone', 'lookup', 'reverse', 'telefon', 'subscriber', 'owner'],
+  },
+  {
+    id: 'lassox_financial_analysis',
+    title: 'Get Lassox Financial Analysis',
+    description:
+      'Run the Lassox Financial Analysis (Regnskabsanalyse) module on a Danish company. Returns HTML-formatted textual analysis plus the latest and previous reports.',
+    risk: 'read',
+    examples: [
+      { entityType: 'company', id: '34580820' },
+      { lassoId: 'CVR-1-34580820' },
+    ],
+    identifierFormats: ['CVR-1-{cvr}'],
+    safetyNotes: [
+      'Read-only. Only company Lasso IDs (CVR-1-*) are accepted.',
+      'Lassox Module API. May require a separate subscription on your Lassox account.',
+      'Response text contains HTML formatting tags such as <br/> and <ul>.',
+    ],
+    keywords: [
+      'financial analysis',
+      'regnskabsanalyse',
+      'module',
+      'analysis',
+      'credit',
+      'ebitda',
+      'working capital',
+    ],
+  },
 ];
 
 export function searchCapabilities(query: string, limit = 20): LassoCapability[] {
