@@ -9,11 +9,18 @@ const ALLOWED_READ_TOOLS = new Set([
   'cvr_get_entity',
   'cvr_get_entity_history',
   'cvr_get_related',
+  'cvr_get_reports',
+  'lassox_financial_analysis',
+  'cvr_get_network',
+  'cvr_get_ownership_graph',
+  'creditsafe_get_rating',
+  'teledata_get_company_phones',
+  'teledata_lookup_phone',
 ]);
 
 export function checkToolPolicy(toolName: string): LassoPolicyDecision {
   if (ALLOWED_READ_TOOLS.has(toolName)) {
-    return { allowed: true, reason: 'read-only Lassox CVR tool' };
+    return { allowed: true, reason: 'read-only Lassox tool' };
   }
 
   return { allowed: false, reason: `tool is not allowlisted: ${toolName}` };
