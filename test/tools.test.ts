@@ -32,6 +32,13 @@ describe('Lassox tool hardening', () => {
       'cvr_search',
       'cvr_get_entity',
       'cvr_get_entity_history',
+      'cvr_get_reports',
+      'lassox_financial_analysis',
+      'cvr_get_network',
+      'cvr_get_ownership_graph',
+      'creditsafe_get_rating',
+      'teledata_get_company_phones',
+      'teledata_lookup_phone',
       'cvr_get_related',
     ]);
 
@@ -54,6 +61,13 @@ describe('Lassox tool hardening', () => {
 
   it('keeps the policy allowlist read-only', () => {
     expect(checkToolPolicy('cvr_search')).toMatchObject({ allowed: true });
+    expect(checkToolPolicy('cvr_get_reports')).toMatchObject({ allowed: true });
+    expect(checkToolPolicy('lassox_financial_analysis')).toMatchObject({ allowed: true });
+    expect(checkToolPolicy('cvr_get_network')).toMatchObject({ allowed: true });
+    expect(checkToolPolicy('cvr_get_ownership_graph')).toMatchObject({ allowed: true });
+    expect(checkToolPolicy('creditsafe_get_rating')).toMatchObject({ allowed: true });
+    expect(checkToolPolicy('teledata_get_company_phones')).toMatchObject({ allowed: true });
+    expect(checkToolPolicy('teledata_lookup_phone')).toMatchObject({ allowed: true });
     expect(checkToolPolicy('cvr_delete_entity')).toMatchObject({ allowed: false });
   });
 

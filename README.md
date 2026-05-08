@@ -6,14 +6,20 @@ TypeScript MCP server for the Lassox CVR API. It gives agents named tools for co
 
 ## Scope
 
-This first version covers the core CVR API only:
+Supported Lassox APIs:
 
 - Search companies and people.
 - Fetch current company, production unit, or person data.
 - Fetch historical company, production unit, or person data.
 - Fetch documented related entities.
+- Fetch annual report key figures (nøgletal) for companies.
+- Run the Lassox Financial Analysis (Regnskabsanalyse) module on companies.
+- Fetch a person's professional network (Lassox Network module).
+- Build ownership / voting-rights graphs with optional UBO and report enrichment (Lassox Ownership Structure module).
+- Fetch Creditsafe credit ratings for companies (Lassox Creditsafe data API).
+- Look up registered phone numbers for a company, or reverse-lookup a phone number (Lassox Teledata data API).
 
-Reports, key figures, report PDFs, delta polling, monitoring, webhooks, and non-CVR Lassox APIs are intentionally out of scope.
+Report PDFs, delta polling, monitoring, webhooks, and other non-CVR Lassox APIs are intentionally out of scope.
 
 ## Setup
 
@@ -152,6 +158,123 @@ Fetch historical CVR basic information:
 ```
 
 Historical responses are returned unchanged from Lassox, including `value`, `from`, `to`, and `current` wrappers.
+
+### `cvr_get_reports`
+
+Fetch annual report key figures (nøgletal) for a Danish company. Returns Lassox JSON converted from XBRL with metadata, balance-sheet items, EBITDA, employees, auditors, and optional group reports.
+
+```json
+{
+  "entityType": "company",
+  "id": "34580820"
+}
+```
+
+Optional ISO 4217 `currency` code triggers Lassox currency conversion:
+
+```json
+{
+  "lassoId": "CVR-1-34580820",
+  "currency": "EUR"
+}
+```
+
+Only company Lasso IDs (`CVR-1-*`) are accepted; production units and persons are rejected before the request reaches Lassox.
+
+### `lassox_financial_analysis`
+
+Run the Lassox Financial Analysis (Regnskabsanalyse) module on a Danish company. Returns a textual analysis (HTML-formatted, e.g. `<br/>`, `<ul>`) covering gross profit, EBITDA, balance sheet, working capital, and credit policy, plus the latest and previous reports.
+
+```json
+{
+  "entityType": "company",
+  "id": "34580820"
+}
+```
+
+This tool calls the Lassox **Module API** at `POST /modules/reportanalysis/{lassoId}` and may require a separate subscription on your Lassox account. Only company Lasso IDs are accepted.
+
+### `cvr_get_network`
+
+Fetch a person's professional network — every company they have been connected to, current roles, and time-overlapping relations with other people.
+
+```json
+{
+  "entityType": "person",
+  "id": "4004094652"
+}
+```
+
+Only person Lasso IDs (`CVR-3-*`) are accepted. This calls the Lassox **Module API** at `GET /modules/network/{lassoId}` and may require a separate subscription.
+
+### `cvr_get_ownership_graph`
+
+Build an ownership and voting-rights graph for one or more entities, with optional enrichment.
+
+```json
+{
+  "ids": ["CVR-1-34580820"],
+  "relationTypes": ["ownership"],
+  "enrichments": ["companyinfo", "ultimateOwners"],
+  "outgoingDepth": 2
+}
+```
+
+Inputs:
+
+- `ids` — 1–25 Lasso IDs (`CVR-1-*`, `CVR-2-*`, or `CVR-3-*`) to seed the graph.
+- `relationTypes` — any of `ownership`, `votingrights`, `unknownOwnership` (default `["ownership"]`).
+- `enrichments` — any of `companyinfo`, `personinfo`, `reports`, `ultimateOwners`.
+- `ingoingDepth`, `outgoingDepth` — 0–10. Higher values traverse more edges and can produce large responses; start small.
+- `onDate` — optional `YYYY-MM-DD` for a historical snapshot.
+
+This calls the Lassox **Module API** at `POST /modules/relations/graph` and may require a separate subscription.
+
+### `creditsafe_get_rating`
+
+Fetch the Creditsafe credit rating for a Danish company. Returns current and previous international + local scores, descriptions, credit max, currency, and a PDF link.
+
+```json
+{
+  "cvr": "34580820"
+}
+```
+
+Or use a Lasso ID and force a fresh upstream call:
+
+```json
+{
+  "lassoId": "CVR-1-34580820",
+  "skipCache": true
+}
+```
+
+Lassox caches Creditsafe responses for 24 hours; `skipCache=true` may incur extra cost.
+
+### `teledata_get_company_phones`
+
+Fetch phone numbers registered to a Danish company.
+
+```json
+{
+  "lassoId": "CVR-1-34580820"
+}
+```
+
+Only company Lasso IDs are accepted.
+
+### `teledata_lookup_phone`
+
+Reverse-lookup a Danish phone number — subscriber name, address, supplier, protection codes.
+
+```json
+{
+  "phoneNumber": "+4570201020",
+  "includeCompany": true
+}
+```
+
+Spaces, dashes and parentheses are stripped from `phoneNumber`. With `includeCompany=true` the response includes CVR data when the number belongs to a company.
 
 ### `cvr_get_related`
 
