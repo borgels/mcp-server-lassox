@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-05-13
+
+### Added
+
+- Apache-2.0 `LICENSE` file and package metadata.
+- `SECURITY.md` with the project security contact.
+- GitHub Actions CI and Dependabot configuration.
+- HTTP transport hardening: loopback default binding, optional bearer token,
+  configurable CORS allowlist, 10 MiB default request-body cap, and explicit
+  override for controlled deployments.
+- Package publish allowlist and `prepack` build guard.
+
+### Security
+
+- Added a `fast-uri` override alongside the existing MCP HTTP transport
+  transitive dependency overrides.
+- Updated `zod`, `vitest`, and `@types/node` to current compatible releases.
+
 ## [0.2.0] - 2026-05-08
 
 Adds seven new read-only Lassox tools (key figures, financial analysis,
@@ -123,7 +141,8 @@ transport for non-stdio clients.
   never accepted as a tool argument.
 - No request or response bodies are logged by the server.
 
-[Unreleased]: https://github.com/Borgels/mcp-server-lassox/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Borgels/mcp-server-lassox/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/Borgels/mcp-server-lassox/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Borgels/mcp-server-lassox/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/Borgels/mcp-server-lassox/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Borgels/mcp-server-lassox/releases/tag/v0.1.0
