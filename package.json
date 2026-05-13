@@ -4,6 +4,13 @@
   "description": "MCP server for the Lassox CVR API.",
   "type": "module",
   "main": "./dist/stdio.js",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    ".env.example"
+  ],
   "bin": {
     "mcp-server-lassox": "./dist/stdio.js"
   },
@@ -13,6 +20,7 @@
     "dev:http": "tsx src/transports/http.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "prepack": "npm run typecheck && npm test && npm run build",
     "smoke:live": "tsx test/live-smoke.ts"
   },
   "repository": {
@@ -25,7 +33,7 @@
     "cvr"
   ],
   "author": "",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "engines": {
     "node": ">=20.11"
   },
@@ -39,7 +47,8 @@
   },
   "overrides": {
     "ip-address": ">=10.1.1",
-    "hono": ">=4.12.16"
+    "hono": ">=4.12.16",
+    "fast-uri": ">=3.1.2"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",

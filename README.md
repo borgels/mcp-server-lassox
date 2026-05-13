@@ -1,8 +1,14 @@
 # mcp-server-lassox
 
-TypeScript MCP server for the Lassox CVR API. It gives agents named tools for core CVR lookup and search, so they do not need to build Lassox API URLs directly.
+TypeScript MCP server for the Lassox CVR API. It is intentionally boring good:
+typed, documented, read-first, policy-aware, credential-sane, and
+audit-friendly.
 
-> **Disclaimer:** This is an independent, unofficial project. It is not affiliated with, endorsed by, or supported by Lasso X. "Lassox" / "Lasso X" and the CVR API are referenced only to describe what this server talks to. You need your own Lassox API key, and use of the Lassox API is subject to Lassox's own terms.
+> **Disclaimer:** This is an independent, unofficial project by Borgels. Borgels
+> is not affiliated with, endorsed by, or supported by Lasso X. "Lassox" /
+> "Lasso X" and the CVR API are referenced only to describe what this server
+> talks to. You need your own Lassox API key, and use of the Lassox API is
+> subject to Lassox's own terms.
 
 ## Scope
 
@@ -43,7 +49,7 @@ export LASSO_TIMEOUT_MS=30000
 export LASSO_AUDIT_LOG="/absolute/path/to/lassox-audit.jsonl"
 ```
 
-## Cursor Or Claude Config
+## Claude Or Cursor Config
 
 Use the stdio server for local agent clients:
 
@@ -303,7 +309,12 @@ The local stdio transport is the default for agent compatibility. A small Stream
 PORT=3000 LASSO_API_KEY="your-api-key" npm run dev:http
 ```
 
-The MCP endpoint is `POST http://localhost:3000/mcp`.
+By default the HTTP server binds to `127.0.0.1`, limits request bodies to 10 MiB,
+allows browser CORS only from loopback origins, and does not require an HTTP
+Bearer token. You can override this with `MCP_HTTP_HOST`, `MCP_MAX_BODY_BYTES`,
+`MCP_ALLOWED_ORIGINS`, `MCP_ALLOW_ANY_ORIGIN=true`, and `MCP_HTTP_TOKEN`.
+
+The MCP endpoint is `POST http://127.0.0.1:3000/mcp`.
 
 ## Verification
 
@@ -332,3 +343,14 @@ Lassox documents a limit of 500 requests per minute per API key. If Lassox retur
 - Error formatting redacts `lasso-api-key`, `LASSO_API_KEY`, and `apiKey`-style secret material.
 - The server exposes only read-only CVR tools. A small policy module keeps that invariant explicit for future expansion.
 - If `LASSO_AUDIT_LOG` is set, each tool call writes JSONL audit events with timestamp, request id, tool name, action, target hash, status, and redacted error text. Raw search/entity inputs and API keys are not written to the audit log.
+- Report suspected vulnerabilities privately to <security@borgels.com>. Do not
+  include API keys, personal data, or other secrets in public GitHub issues.
+
+## API Sources
+
+- Lassox docs: <https://docs.lassox.com/>
+- Lassox API: <https://api.lassox.com/>
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE).
