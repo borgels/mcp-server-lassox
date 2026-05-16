@@ -301,6 +301,41 @@ Supported combinations:
 
 Set `history` to `true` to call the relation history endpoint.
 
+## Optional MCP Apps Add-On
+
+The core CVR server is unchanged by default. Setting `LASSO_APPS=1` opts in to an
+add-on that registers extra MCP Apps tools and inline UI widgets alongside the
+read-only CVR tools, following the official
+[MCP Apps extension](https://blog.modelcontextprotocol.io/posts/2026-01-26-mcp-apps/)
+(SEP-1865, stable 2026-01-26).
+
+```sh
+LASSO_API_KEY="your-api-key" LASSO_APPS=1 npm run dev
+```
+
+Without the flag the server behaves exactly as before — no extra tools, no UI
+resources, no behavioural change for clients that do not support MCP Apps.
+
+The first add-on app is **Lassox Financial Trend Chart**:
+
+- Tool `lassox_financial_chart({ lassoId | entityType+id, years?=4, currency? })`
+  returns a narrow time-series of revenue (omsætning), gross profit
+  (bruttofortjeneste), and net result (årets resultat) for a Danish company's
+  last N annual reports. Internally it calls the same Lassox `/reports`
+  endpoint as `cvr_get_reports` and trims the response.
+- The tool advertises a UI resource via `_meta`:
+  `{ "io.modelcontextprotocol/ui": { "resourceUri": "ui://lassox/financial-trend" } }`.
+- The resource is registered with MIME type
+  `text/html;profile=mcp-app` and serves a self-contained HTML+SVG widget that
+  reads `structuredContent` from the host via JSON-RPC over `postMessage`. No
+  external dependencies, no `window.openai` legacy bridge.
+- The tool also returns a Markdown text fallback in `content`, so classic
+  (non-Apps) MCP clients still get a useful response.
+
+Inspect the widget with MCP Inspector by reading the resource directly, or
+trigger the tool with a CVR-1 Lasso ID and let the host render the chart
+inline.
+
 ## Optional HTTP Server
 
 The local stdio transport is the default for agent compatibility. A small Streamable HTTP entrypoint is also available:

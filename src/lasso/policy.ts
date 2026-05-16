@@ -16,6 +16,7 @@ const ALLOWED_READ_TOOLS = new Set([
   'creditsafe_get_rating',
   'teledata_get_company_phones',
   'teledata_lookup_phone',
+  'lassox_financial_chart',
 ]);
 
 export function checkToolPolicy(toolName: string): LassoPolicyDecision {
