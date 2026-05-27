@@ -33,7 +33,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Borgels/mcp-server-lassox.git"
+    "url": "git+https://github.com/borgels/mcp-server-lassox.git"
   },
   "keywords": [
     "mcp",
@@ -46,9 +46,9 @@
     "node": ">=20.11"
   },
   "bugs": {
-    "url": "https://github.com/Borgels/mcp-server-lassox/issues"
+    "url": "https://github.com/borgels/mcp-server-lassox/issues"
   },
-  "homepage": "https://github.com/Borgels/mcp-server-lassox#readme",
+  "homepage": "https://github.com/borgels/mcp-server-lassox#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "zod": "^4.4.3"
