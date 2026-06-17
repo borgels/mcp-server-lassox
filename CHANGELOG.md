@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-17
+
+### Added
+
+- `cvr_batch_get_entities` tool — fetch current CVR basic information for many
+  entities (companies, production units, or people) in a single call. Lassox has
+  no native batch endpoint, so the tool fans out single-entity lookups with
+  bounded concurrency (1–20, default 8), retries rate-limit (`429`) responses
+  while honouring `retry-after`, and isolates per-item failures so one bad lookup
+  never sinks the rest of the batch. Returns `{ total, succeeded, failed,
+  results[] }` in input order, where each result is `{ index, label, ok, data |
+  error }`. Accepts 1–100 items.
+- MCP `notifications/progress` streaming for `cvr_batch_get_entities`: when the
+  client includes a `progressToken`, the server emits incremental progress
+  (items completed, batch size, and a per-item status message) as each lookup
+  settles.
+- Reusable bounded-concurrency batch runner and rate-limit retry helper
+  (`src/lasso/batch.ts`) for future batch tools.
+
 ## [0.2.1] - 2026-05-13
 
 ### Added
@@ -141,7 +160,8 @@ transport for non-stdio clients.
   never accepted as a tool argument.
 - No request or response bodies are logged by the server.
 
-[Unreleased]: https://github.com/Borgels/mcp-server-lassox/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/Borgels/mcp-server-lassox/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Borgels/mcp-server-lassox/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/Borgels/mcp-server-lassox/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Borgels/mcp-server-lassox/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/Borgels/mcp-server-lassox/compare/v0.1.0...v0.1.1
