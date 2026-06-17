@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Optional `fields` dot-path projection on `cvr_get_entity` and
+  `cvr_batch_get_entities`. Callers can request only the fields they need so a
+  response is shrunk from the full record (~14 KB per entity) to just those
+  paths — projecting a 100-item batch down to a handful of fields takes the
+  response from well over 1 MB to tens of kilobytes. Paths descend nested
+  objects and map over arrays (e.g. `address.postalCode`,
+  `management.members.name`); naming an object keeps its whole subtree, and
+  unknown paths are skipped. Implemented as a reusable `selectFields` helper
+  (`src/lasso/fields.ts`).
+
 ## [0.3.0] - 2026-06-17
 
 ### Added

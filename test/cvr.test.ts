@@ -148,9 +148,43 @@ describe('getCvrEntitiesBatch', () => {
     expect(result.results[0]).toMatchObject({ ok: false, label: '(invalid item)' });
   });
 
+  it('projects each entity to the requested fields', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      jsonResponse({ name: 'LASSO X A/S', cvr: 34580820, status: 'NORMAL', address: { zipCode: '1620' } }),
+    );
+    const client = new LassoClient({
+      apiKey: 'test-key',
+      baseUrl: 'https://example.test',
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    const result = await getCvrEntitiesBatch(client, {
+      items: [{ lassoId: 'CVR-1-34580820' }],
+      fields: ['name', 'address.zipCode'],
+    });
+
+    expect(result.results[0]?.data).toEqual({ name: 'LASSO X A/S', address: { zipCode: '1620' } });
+  });
+
   it('throws when items is empty', async () => {
     const client = new LassoClient({ apiKey: 'test-key', baseUrl: 'https://example.test' });
     await expect(getCvrEntitiesBatch(client, { items: [] })).rejects.toThrow('at least one');
+  });
+});
+
+describe('getCvrEntity field projection', () => {
+  it('projects the response when fields are provided', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      jsonResponse({ name: 'LASSO X A/S', cvr: 34580820, status: 'NORMAL' }),
+    );
+    const client = new LassoClient({
+      apiKey: 'test-key',
+      baseUrl: 'https://example.test',
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    const entity = await getCvrEntity(client, { lassoId: 'CVR-1-34580820', fields: ['name', 'cvr'] });
+    expect(entity).toEqual({ name: 'LASSO X A/S', cvr: 34580820 });
   });
 });
 

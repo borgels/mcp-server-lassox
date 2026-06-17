@@ -46,10 +46,16 @@ export const LASSO_CAPABILITIES: LassoCapability[] = [
     description:
       'Fetch current CVR basic information for a company, production unit, or person.',
     risk: 'read',
-    examples: [{ entityType: 'company', id: '34580820' }, { lassoId: 'CVR-1-34580820' }],
+    examples: [
+      { entityType: 'company', id: '34580820' },
+      { lassoId: 'CVR-1-34580820', fields: ['name', 'cvr', 'status', 'address.streetName'] },
+    ],
     identifierFormats: ['CVR-1-{cvr}', 'CVR-2-{pNumber}', 'CVR-3-{personId}'],
-    safetyNotes: ['Read-only. Does not fetch historical field wrappers.'],
-    keywords: ['current', 'entity', 'company', 'production unit', 'person'],
+    safetyNotes: [
+      'Read-only. Does not fetch historical field wrappers.',
+      'Optional fields[] projects the response to just those dot-paths to reduce size.',
+    ],
+    keywords: ['current', 'entity', 'company', 'production unit', 'person', 'fields', 'projection'],
   },
   {
     id: 'cvr_batch_get_entities',
@@ -61,6 +67,7 @@ export const LASSO_CAPABILITIES: LassoCapability[] = [
       {
         items: [{ entityType: 'company', id: '34580820' }, { lassoId: 'CVR-1-34580821' }],
         concurrency: 8,
+        fields: ['name', 'cvr', 'status', 'address.postalCode', 'industry.text'],
       },
     ],
     identifierFormats: ['Array of { lassoId } or { entityType, id } items.'],
@@ -68,6 +75,7 @@ export const LASSO_CAPABILITIES: LassoCapability[] = [
       'Read-only. Lassox has no native batch endpoint; this fans out individual lookups.',
       'Per-item failures are isolated and reported in results[]; the call does not throw on a single bad item.',
       'Respects the 500 requests/minute Lassox rate limit via bounded concurrency and 429 retry.',
+      'Pass fields[] to project each entity to just those dot-paths — recommended for large batches (full records are ~14 KB each).',
     ],
     keywords: [
       'batch',
@@ -80,6 +88,9 @@ export const LASSO_CAPABILITIES: LassoCapability[] = [
       'companies',
       'parallel',
       'progress',
+      'fields',
+      'projection',
+      'filter',
     ],
   },
   {

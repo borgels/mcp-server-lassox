@@ -4,6 +4,7 @@ import {
   type BatchItemResult,
 } from './batch.js';
 import type { LassoClient, QueryValue } from './client.js';
+import { selectFields } from './fields.js';
 
 export type CvrEntityType = 'company' | 'productionUnit' | 'person';
 export type CvrSearchType = 'company' | 'person' | 'all';
@@ -109,13 +110,19 @@ export async function searchCvr(client: LassoClient, input: CvrSearchInput): Pro
   });
 }
 
-export async function getCvrEntity(client: LassoClient, input: CvrEntityInput): Promise<unknown> {
-  return client.get(`/${parseCvrEntityInput(input)}`);
+export async function getCvrEntity(
+  client: LassoClient,
+  input: CvrEntityInput & { fields?: string[] },
+): Promise<unknown> {
+  const entity = await client.get(`/${parseCvrEntityInput(input)}`);
+  return input.fields ? selectFields(entity, input.fields) : entity;
 }
 
 export interface CvrBatchInput {
   items: CvrEntityInput[];
   concurrency?: number;
+  /** Dot-path field projection applied to each entity to shrink the response. */
+  fields?: string[];
 }
 
 export interface CvrBatchEntry {
@@ -181,7 +188,10 @@ export async function getCvrEntitiesBatch(
 
   const settled = await runBatch(
     input.items,
-    item => callWithRateLimitRetry(() => getCvrEntity(client, item), { signal: options.signal }),
+    item =>
+      callWithRateLimitRetry(() => getCvrEntity(client, { ...item, fields: input.fields }), {
+        signal: options.signal,
+      }),
     {
       concurrency: input.concurrency,
       signal: options.signal,

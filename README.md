@@ -153,6 +153,16 @@ Structured IDs map as follows:
 - `productionUnit` -> `CVR-2-{pNumber}`
 - `person` -> `CVR-3-{personId}`
 
+Pass `fields` to project the response down to just the dot-paths you need (a
+full record is ~14 KB). Paths descend nested objects and map over arrays:
+
+```json
+{
+  "lassoId": "CVR-1-34580820",
+  "fields": ["name", "cvr", "status", "address.streetName", "address.postalCode", "industry.text"]
+}
+```
+
 ### `cvr_batch_get_entities`
 
 Fetch current CVR basic information for many entities in one call. Lassox has no
@@ -168,12 +178,17 @@ rest of the batch.
     { "lassoId": "CVR-1-24256790" },
     { "entityType": "person", "id": "4004094652" }
   ],
-  "concurrency": 8
+  "concurrency": 8,
+  "fields": ["name", "cvr", "status", "address.postalCode", "industry.text"]
 }
 ```
 
 - `items`: 1–100 entries, each either `{ lassoId }` or `{ entityType, id }`.
 - `concurrency`: optional, 1–20 (default 8). Lassox allows 500 requests/minute per API key.
+- `fields`: optional dot-path projection applied to every entity. Paths descend
+  nested objects and map over arrays (e.g. `management.members.name`). Strongly
+  recommended for large batches — projecting a 100-item batch down to a handful
+  of fields shrinks the response from well over 1 MB to tens of kilobytes.
 
 The response summarises the run and preserves input order:
 
