@@ -4,11 +4,14 @@ import { formatUnknownError } from '../errors.js';
 import { writeAuditEvent } from '../lasso/audit.js';
 import { searchCapabilities, TOOL_ANNOTATIONS } from '../lasso/capabilities.js';
 import type { LassoClient } from '../lasso/client.js';
+import { MAX_BATCH_CONCURRENCY } from '../lasso/batch.js';
 import {
+  getCvrEntitiesBatch,
   getCvrEntity,
   getCvrEntityHistory,
   getRelatedEntities,
   searchCvr,
+  type CvrBatchProgress,
 } from '../lasso/cvr.js';
 import { getCreditsafeRating } from '../lasso/creditsafe.js';
 import { getCvrReports, getFinancialAnalysis } from '../lasso/financials.js';
@@ -124,6 +127,39 @@ export function registerCvrTools(server: McpServer, client: LassoClient): void {
     async input =>
       runAuditedTool('cvr_get_entity', input, async () =>
         jsonToolResult(await getCvrEntity(client, input)),
+      ),
+  );
+
+  server.registerTool(
+    'cvr_batch_get_entities',
+    {
+      title: 'Batch Get CVR Entities',
+      description:
+        'Fetch current Lassox CVR basic information for many entities (companies, production units, or people) in one call. Lassox has no native batch endpoint, so this fans out single-entity lookups with bounded concurrency, retries rate-limit (HTTP 429) responses, and isolates per-item failures. Returns { total, succeeded, failed, results[] } where each result is { index, label, ok, data | error }. When the MCP client sends a progressToken, incremental notifications/progress are emitted as each item completes.',
+      inputSchema: {
+        items: z
+          .array(entityInputSchema)
+          .min(1)
+          .max(100)
+          .describe('Entities to fetch. Each item is either { lassoId } or { entityType, id }.'),
+        concurrency: z
+          .number()
+          .int()
+          .min(1)
+          .max(MAX_BATCH_CONCURRENCY)
+          .optional()
+          .describe(`Parallel requests, 1-${MAX_BATCH_CONCURRENCY}. Defaults to 8. Lassox allows 500 requests/minute per API key.`),
+      },
+      annotations: TOOL_ANNOTATIONS,
+    },
+    async (input, extra) =>
+      runAuditedTool('cvr_batch_get_entities', input, async () =>
+        jsonToolResult(
+          await getCvrEntitiesBatch(client, input, {
+            signal: extra?.signal,
+            onProgress: makeProgressReporter(extra),
+          }),
+        ),
       ),
   );
 
@@ -347,6 +383,48 @@ async function runAuditedTool<T>(tool: string, input: unknown, call: () => Promi
   }
 }
 
+interface ProgressCapableExtra {
+  signal?: AbortSignal;
+  _meta?: { progressToken?: string | number };
+  sendNotification?: (notification: {
+    method: 'notifications/progress';
+    params: {
+      progressToken: string | number;
+      progress: number;
+      total?: number;
+      message?: string;
+    };
+  }) => Promise<void>;
+}
+
+/**
+ * Builds an onProgress callback that streams MCP progress notifications, but
+ * only when the client opted in by sending a progressToken. Returns undefined
+ * otherwise so the batch runner skips progress work entirely.
+ */
+function makeProgressReporter(
+  extra: ProgressCapableExtra | undefined,
+): ((progress: CvrBatchProgress) => Promise<void>) | undefined {
+  const progressToken = extra?._meta?.progressToken;
+  const sendNotification = extra?.sendNotification;
+  if (progressToken === undefined || !sendNotification) {
+    return undefined;
+  }
+
+  return async progress => {
+    const status = progress.ok ? 'ok' : `error: ${progress.error ?? 'failed'}`;
+    await sendNotification({
+      method: 'notifications/progress',
+      params: {
+        progressToken,
+        progress: progress.completed,
+        total: progress.total,
+        message: `${progress.completed}/${progress.total} — ${progress.label} ${status}`,
+      },
+    });
+  };
+}
+
 function auditTarget(input: unknown): unknown {
   if (!input || typeof input !== 'object') {
     return input;
@@ -354,6 +432,8 @@ function auditTarget(input: unknown): unknown {
 
   const value = input as Record<string, unknown>;
   return {
+    itemCount: Array.isArray(value.items) ? value.items.length : undefined,
+    concurrency: value.concurrency,
     lassoId: value.lassoId,
     entityType: value.entityType,
     id: value.id,

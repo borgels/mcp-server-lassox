@@ -7,6 +7,7 @@ const ALLOWED_READ_TOOLS = new Set([
   'lassox_search_capabilities',
   'cvr_search',
   'cvr_get_entity',
+  'cvr_batch_get_entities',
   'cvr_get_entity_history',
   'cvr_get_related',
   'cvr_get_reports',

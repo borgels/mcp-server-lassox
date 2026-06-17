@@ -1,3 +1,8 @@
+import {
+  callWithRateLimitRetry,
+  runBatch,
+  type BatchItemResult,
+} from './batch.js';
 import type { LassoClient, QueryValue } from './client.js';
 
 export type CvrEntityType = 'company' | 'productionUnit' | 'person';
@@ -106,6 +111,112 @@ export async function searchCvr(client: LassoClient, input: CvrSearchInput): Pro
 
 export async function getCvrEntity(client: LassoClient, input: CvrEntityInput): Promise<unknown> {
   return client.get(`/${parseCvrEntityInput(input)}`);
+}
+
+export interface CvrBatchInput {
+  items: CvrEntityInput[];
+  concurrency?: number;
+}
+
+export interface CvrBatchEntry {
+  index: number;
+  /** The resolved Lasso ID, or the raw input when it could not be parsed. */
+  label: string;
+  ok: boolean;
+  data?: unknown;
+  error?: string;
+}
+
+export interface CvrBatchResult {
+  total: number;
+  succeeded: number;
+  failed: number;
+  results: CvrBatchEntry[];
+}
+
+export interface CvrBatchProgress {
+  completed: number;
+  total: number;
+  label: string;
+  ok: boolean;
+  error?: string;
+}
+
+export interface CvrBatchOptions {
+  signal?: AbortSignal;
+  onProgress?: (progress: CvrBatchProgress) => void | Promise<void>;
+}
+
+/** Resolves a human-readable label for an item without throwing on bad input. */
+function entityLabel(input: CvrEntityInput): string {
+  try {
+    return parseCvrEntityInput(input);
+  } catch {
+    if (input.lassoId) {
+      return input.lassoId;
+    }
+    if (input.entityType && input.id !== undefined && input.id !== null) {
+      return `${input.entityType}:${input.id}`;
+    }
+    return '(invalid item)';
+  }
+}
+
+/**
+ * Fetches current basic information for many CVR entities in one tool call.
+ * Lassox has no native batch endpoint, so this fans out single-entity GETs with
+ * bounded concurrency, retries HTTP 429 (respecting retry-after), and isolates
+ * per-item failures so one bad lookup never sinks the rest of the batch.
+ */
+export async function getCvrEntitiesBatch(
+  client: LassoClient,
+  input: CvrBatchInput,
+  options: CvrBatchOptions = {},
+): Promise<CvrBatchResult> {
+  if (!Array.isArray(input.items) || input.items.length === 0) {
+    throw new Error('Provide at least one entity in items.');
+  }
+
+  const labels = input.items.map(entityLabel);
+
+  const settled = await runBatch(
+    input.items,
+    item => callWithRateLimitRetry(() => getCvrEntity(client, item), { signal: options.signal }),
+    {
+      concurrency: input.concurrency,
+      signal: options.signal,
+      onProgress: options.onProgress
+        ? async (completed, total, last) => {
+            await options.onProgress?.({
+              completed,
+              total,
+              label: labels[last.index] ?? '(unknown)',
+              ok: last.ok,
+              error: last.ok ? undefined : last.error,
+            });
+          }
+        : undefined,
+    },
+  );
+
+  return summarizeBatch(settled, labels);
+}
+
+function summarizeBatch(settled: BatchItemResult<unknown>[], labels: string[]): CvrBatchResult {
+  const results: CvrBatchEntry[] = settled.map(item =>
+    item.ok
+      ? { index: item.index, label: labels[item.index] ?? '(unknown)', ok: true, data: item.value }
+      : { index: item.index, label: labels[item.index] ?? '(unknown)', ok: false, error: item.error },
+  );
+
+  const succeeded = results.filter(entry => entry.ok).length;
+
+  return {
+    total: results.length,
+    succeeded,
+    failed: results.length - succeeded,
+    results,
+  };
 }
 
 export async function getCvrEntityHistory(client: LassoClient, input: CvrEntityInput): Promise<unknown> {

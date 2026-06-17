@@ -52,6 +52,37 @@ export const LASSO_CAPABILITIES: LassoCapability[] = [
     keywords: ['current', 'entity', 'company', 'production unit', 'person'],
   },
   {
+    id: 'cvr_batch_get_entities',
+    title: 'Batch Get CVR Entities',
+    description:
+      'Fetch current CVR basic information for many entities in one call. Fans out single-entity lookups with bounded concurrency, retries HTTP 429, and isolates per-item failures. Emits MCP progress notifications when the client sends a progressToken.',
+    risk: 'read',
+    examples: [
+      {
+        items: [{ entityType: 'company', id: '34580820' }, { lassoId: 'CVR-1-34580821' }],
+        concurrency: 8,
+      },
+    ],
+    identifierFormats: ['Array of { lassoId } or { entityType, id } items.'],
+    safetyNotes: [
+      'Read-only. Lassox has no native batch endpoint; this fans out individual lookups.',
+      'Per-item failures are isolated and reported in results[]; the call does not throw on a single bad item.',
+      'Respects the 500 requests/minute Lassox rate limit via bounded concurrency and 429 retry.',
+    ],
+    keywords: [
+      'batch',
+      'bulk',
+      'multiple',
+      'many',
+      'list',
+      'mass',
+      'entities',
+      'companies',
+      'parallel',
+      'progress',
+    ],
+  },
+  {
     id: 'cvr_get_entity_history',
     title: 'Get CVR Entity History',
     description: 'Fetch historical CVR basic information for a company, production unit, or person.',

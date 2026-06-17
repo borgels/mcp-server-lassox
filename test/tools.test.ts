@@ -31,6 +31,7 @@ describe('Lassox tool hardening', () => {
       'lassox_search_capabilities',
       'cvr_search',
       'cvr_get_entity',
+      'cvr_batch_get_entities',
       'cvr_get_entity_history',
       'cvr_get_reports',
       'lassox_financial_analysis',
@@ -61,6 +62,7 @@ describe('Lassox tool hardening', () => {
 
   it('keeps the policy allowlist read-only', () => {
     expect(checkToolPolicy('cvr_search')).toMatchObject({ allowed: true });
+    expect(checkToolPolicy('cvr_batch_get_entities')).toMatchObject({ allowed: true });
     expect(checkToolPolicy('cvr_get_reports')).toMatchObject({ allowed: true });
     expect(checkToolPolicy('lassox_financial_analysis')).toMatchObject({ allowed: true });
     expect(checkToolPolicy('cvr_get_network')).toMatchObject({ allowed: true });
