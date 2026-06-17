@@ -153,6 +153,48 @@ Structured IDs map as follows:
 - `productionUnit` -> `CVR-2-{pNumber}`
 - `person` -> `CVR-3-{personId}`
 
+### `cvr_batch_get_entities`
+
+Fetch current CVR basic information for many entities in one call. Lassox has no
+native batch endpoint, so this fans out single-entity lookups with bounded
+concurrency, retries rate-limit (HTTP 429) responses while honouring
+`retry-after`, and isolates per-item failures so one bad lookup never sinks the
+rest of the batch.
+
+```json
+{
+  "items": [
+    { "entityType": "company", "id": "34580820" },
+    { "lassoId": "CVR-1-24256790" },
+    { "entityType": "person", "id": "4004094652" }
+  ],
+  "concurrency": 8
+}
+```
+
+- `items`: 1–100 entries, each either `{ lassoId }` or `{ entityType, id }`.
+- `concurrency`: optional, 1–20 (default 8). Lassox allows 500 requests/minute per API key.
+
+The response summarises the run and preserves input order:
+
+```json
+{
+  "total": 3,
+  "succeeded": 2,
+  "failed": 1,
+  "results": [
+    { "index": 0, "label": "CVR-1-34580820", "ok": true, "data": { } },
+    { "index": 1, "label": "CVR-1-24256790", "ok": true, "data": { } },
+    { "index": 2, "label": "CVR-3-4004094652", "ok": false, "error": "Lassox API request failed with HTTP 404 ..." }
+  ]
+}
+```
+
+When the MCP client includes a `progressToken` in the request, the server emits
+`notifications/progress` as each item settles (`progress` = items completed,
+`total` = batch size, `message` = e.g. `2/3 — CVR-1-24256790 ok`), so the client
+can show live progress for large batches.
+
 ### `cvr_get_entity_history`
 
 Fetch historical CVR basic information:
