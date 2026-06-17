@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-06-17
+
+### Added
+
+- Optional `fields` dot-path projection on `cvr_get_entity` and
+  `cvr_batch_get_entities`. Callers can request only the fields they need so a
+  response is shrunk from the full record (~14 KB per entity) to just those
+  paths — projecting a 100-item batch down to a handful of fields takes the
+  response from well over 1 MB to tens of kilobytes. Paths descend nested
+  objects and map over arrays (e.g. `address.postalCode`,
+  `management.members.name`); naming an object keeps its whole subtree, and
+  unknown paths are skipped. Implemented as a reusable `selectFields` helper
+  (`src/lasso/fields.ts`).
+
 ## [0.3.0] - 2026-06-17
 
 ### Added
@@ -168,7 +182,8 @@ transport for non-stdio clients.
   never accepted as a tool argument.
 - No request or response bodies are logged by the server.
 
-[Unreleased]: https://github.com/Borgels/mcp-server-lassox/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Borgels/mcp-server-lassox/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/Borgels/mcp-server-lassox/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Borgels/mcp-server-lassox/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/Borgels/mcp-server-lassox/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Borgels/mcp-server-lassox/compare/v0.1.1...v0.2.0

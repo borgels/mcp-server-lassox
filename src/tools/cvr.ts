@@ -29,11 +29,25 @@ const entityInputShape = {
   id: z.union([z.string().trim().min(1), z.number().int().positive()]).optional(),
 };
 
+const hasIdentifier = (input: { lassoId?: string; entityType?: string; id?: string | number }): boolean =>
+  Boolean(input.lassoId) || (Boolean(input.entityType) && input.id !== undefined);
+
 const entityInputSchema = z
   .object(entityInputShape)
-  .refine(input => Boolean(input.lassoId) || (Boolean(input.entityType) && input.id !== undefined), {
-    message: 'Provide either lassoId or both entityType and id.',
-  });
+  .refine(hasIdentifier, { message: 'Provide either lassoId or both entityType and id.' });
+
+const fieldsSchema = z
+  .array(z.string().trim().min(1))
+  .min(1)
+  .max(100)
+  .optional()
+  .describe(
+    'Optional dot-path field projection to shrink the response — only these fields are returned per entity. Descends nested objects and maps over arrays, e.g. ["name","cvr","status","address.streetName","address.postalCode","industry.text","management.members.name"]. Omit to return the full record (~14 KB per entity).',
+  );
+
+const entityWithFieldsSchema = z
+  .object({ ...entityInputShape, fields: fieldsSchema })
+  .refine(hasIdentifier, { message: 'Provide either lassoId or both entityType and id.' });
 
 const companyEntityInputShape = {
   lassoId: z
@@ -120,8 +134,8 @@ export function registerCvrTools(server: McpServer, client: LassoClient): void {
     {
       title: 'Get CVR Entity',
       description:
-        'Fetch current Lassox CVR basic information for a company, production unit, or person. Provide either a Lasso ID or entityType plus id.',
-      inputSchema: entityInputSchema,
+        'Fetch current Lassox CVR basic information for a company, production unit, or person. Provide either a Lasso ID or entityType plus id. Pass fields to project the response down to just the dot-paths you need.',
+      inputSchema: entityWithFieldsSchema,
       annotations: TOOL_ANNOTATIONS,
     },
     async input =>
@@ -135,7 +149,7 @@ export function registerCvrTools(server: McpServer, client: LassoClient): void {
     {
       title: 'Batch Get CVR Entities',
       description:
-        'Fetch current Lassox CVR basic information for many entities (companies, production units, or people) in one call. Lassox has no native batch endpoint, so this fans out single-entity lookups with bounded concurrency, retries rate-limit (HTTP 429) responses, and isolates per-item failures. Returns { total, succeeded, failed, results[] } where each result is { index, label, ok, data | error }. When the MCP client sends a progressToken, incremental notifications/progress are emitted as each item completes.',
+        'Fetch current Lassox CVR basic information for many entities (companies, production units, or people) in one call. Lassox has no native batch endpoint, so this fans out single-entity lookups with bounded concurrency, retries rate-limit (HTTP 429) responses, and isolates per-item failures. Returns { total, succeeded, failed, results[] } where each result is { index, label, ok, data | error }. Pass fields to project each entity down to just the dot-paths you need — strongly recommended for large batches, since the full record is ~14 KB per entity (100 items is well over 1 MB). When the MCP client sends a progressToken, incremental notifications/progress are emitted as each item completes.',
       inputSchema: {
         items: z
           .array(entityInputSchema)
@@ -149,6 +163,7 @@ export function registerCvrTools(server: McpServer, client: LassoClient): void {
           .max(MAX_BATCH_CONCURRENCY)
           .optional()
           .describe(`Parallel requests, 1-${MAX_BATCH_CONCURRENCY}. Defaults to 8. Lassox allows 500 requests/minute per API key.`),
+        fields: fieldsSchema,
       },
       annotations: TOOL_ANNOTATIONS,
     },
@@ -434,6 +449,7 @@ function auditTarget(input: unknown): unknown {
   return {
     itemCount: Array.isArray(value.items) ? value.items.length : undefined,
     concurrency: value.concurrency,
+    fields: value.fields,
     lassoId: value.lassoId,
     entityType: value.entityType,
     id: value.id,
