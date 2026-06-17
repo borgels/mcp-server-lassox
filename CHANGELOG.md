@@ -26,6 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reusable bounded-concurrency batch runner and rate-limit retry helper
   (`src/lasso/batch.ts`) for future batch tools.
 
+### Security
+
+- Bumped the transitive `hono` override to `>=4.12.25` to clear a high-severity
+  path-traversal advisory
+  ([GHSA-wwfh-h76j-fc44](https://github.com/advisories/GHSA-wwfh-h76j-fc44))
+  pulled in via the MCP SDK's HTTP transport. The vulnerable `serve-static`
+  path is not used by this server.
+
 ## [0.2.1] - 2026-05-13
 
 ### Added
