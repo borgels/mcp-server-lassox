@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Lists tools no longer accept a caller-supplied `userId`. Visible lists are
+  derived server-side (`LASSO_TRUST_FORWARDED_USER` + `LASSO_USER_MAP`, or
+  `LASSO_DEFAULT_USER_ID`), and list reads/changes are restricted to lists
+  visible to the caller.
+- `lassox_list_change` is disabled unless `LASSO_ENABLE_WRITES=true`.
+- `MCP_HTTP_TOKEN` is compared in constant time; the HTTP server refuses to
+  start when forwarded identity is trusted without `MCP_HTTP_TOKEN`.
+- Path parameters are validated before being placed in upstream URLs.
+
 ## [0.4.0] - 2026-07-13
 
 ### Added

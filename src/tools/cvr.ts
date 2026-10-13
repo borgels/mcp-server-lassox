@@ -18,7 +18,8 @@ import { getCvrChanges } from '../lasso/delta.js';
 import { getCvrReports, getFinancialAnalysis } from '../lasso/financials.js';
 import { changeListMembers, getListEntities, getLists, MAX_LIST_CHANGE_IDS } from '../lasso/lists.js';
 import { getCvrNetwork, getOwnershipGraph } from '../lasso/network.js';
-import { checkToolPolicy } from '../lasso/policy.js';
+import type { ListAccessScope } from '../lasso/identity.js';
+import { checkToolPolicy, writesEnabled } from '../lasso/policy.js';
 import {
   DEFAULT_SEGMENT_REQUEST_BUDGET,
   MAX_SEGMENT_REQUEST_BUDGET,
@@ -93,7 +94,18 @@ const searchFiltersSchema = z
   })
   .optional();
 
-export function registerCvrTools(server: McpServer, client: LassoClient): void {
+export interface RegisterCvrToolsOptions {
+  /**
+   * Resolves the caller's list access scope. Called per list tool invocation
+   * and may throw to fail closed (e.g. missing verified identity). Defaults to
+   * shared lists only.
+   */
+  getListScope?: () => ListAccessScope;
+}
+
+export function registerCvrTools(server: McpServer, client: LassoClient, options: RegisterCvrToolsOptions = {}): void {
+  const getListScope = options.getListScope ?? ((): ListAccessScope => ({}));
+
   server.registerTool(
     'lassox_search_capabilities',
     {
@@ -415,15 +427,13 @@ export function registerCvrTools(server: McpServer, client: LassoClient): void {
     {
       title: 'List Lassox Lists (Tags)',
       description:
-        'Fetch the Lassox lists (tags) visible to the account: id, name, entity count, type, and permissions. Lists are curated in the Lasso portal (e.g. via its target-group search) and are the recommended source for broad segments. Pass userId to read a specific user\'s private lists.',
-      inputSchema: {
-        userId: z.string().trim().min(1).optional().describe('Lassox user id for private lists; omit for shared lists.'),
-      },
+        'Fetch the Lassox lists (tags) visible to you: lists shared across the account plus your own private lists (when your identity is mapped to a Lassox user). Returns id, name, entity count, type, and permissions. Lists are curated in the Lasso portal (e.g. via its target-group search) and are the recommended source for broad segments.',
+      inputSchema: {},
       annotations: TOOL_ANNOTATIONS,
     },
     async input =>
       runAuditedTool('lassox_lists_index', input, async () =>
-        jsonToolResult(await getLists(client, input)),
+        jsonToolResult(await getLists(client, getListScope())),
       ),
   );
 
@@ -443,31 +453,34 @@ export function registerCvrTools(server: McpServer, client: LassoClient): void {
     },
     async input =>
       runAuditedTool('lassox_list_get_entities', input, async () =>
-        jsonToolResult(await getListEntities(client, input)),
+        jsonToolResult(await getListEntities(client, input, getListScope())),
       ),
   );
 
-  server.registerTool(
-    'lassox_list_change',
-    {
-      title: 'Change Lassox List Membership (WRITE)',
-      description:
-        'Add or remove entities (Lasso IDs) to/from Lassox lists (tags) in bulk. WRITE operation: modifies list membership in the shared Lasso portal — it never modifies CVR data. Idempotent per (entity, list) pair. Find tag ids with lassox_lists_index.',
-      inputSchema: {
-        lassoIds: z
-          .array(z.string().trim().regex(/^CVR-[123]-\d+$/, 'Each id must be a Lasso ID like CVR-1-34580820.'))
-          .min(1)
-          .max(MAX_LIST_CHANGE_IDS),
-        tagsToAdd: z.array(z.string().trim().min(1)).max(50).optional(),
-        tagsToRemove: z.array(z.string().trim().min(1)).max(50).optional(),
+  // Write tools are opt-in (LASSO_ENABLE_WRITES=true); the policy check also denies them at call time.
+  if (writesEnabled()) {
+    server.registerTool(
+      'lassox_list_change',
+      {
+        title: 'Change Lassox List Membership (WRITE)',
+        description:
+          'Add or remove entities (Lasso IDs) to/from Lassox lists (tags) in bulk. WRITE operation: modifies list membership in the shared Lasso portal — it never modifies CVR data. Idempotent per (entity, list) pair. Only lists visible to you (see lassox_lists_index) can be changed.',
+        inputSchema: {
+          lassoIds: z
+            .array(z.string().trim().regex(/^CVR-[123]-\d+$/, 'Each id must be a Lasso ID like CVR-1-34580820.'))
+            .min(1)
+            .max(MAX_LIST_CHANGE_IDS),
+          tagsToAdd: z.array(z.string().trim().min(1)).max(50).optional(),
+          tagsToRemove: z.array(z.string().trim().min(1)).max(50).optional(),
+        },
+        annotations: WRITE_TOOL_ANNOTATIONS,
       },
-      annotations: WRITE_TOOL_ANNOTATIONS,
-    },
-    async input =>
-      runAuditedTool('lassox_list_change', input, async () =>
-        jsonToolResult(await changeListMembers(client, input)),
-      ),
-  );
+      async input =>
+        runAuditedTool('lassox_list_change', input, async () =>
+          jsonToolResult(await changeListMembers(client, input, getListScope())),
+        ),
+    );
+  }
 
   server.registerTool(
     'cvr_get_changes',
@@ -658,7 +671,6 @@ function auditTarget(input: unknown): unknown {
     postalCodeRanges: value.postalCodeRanges,
     maxRequests: value.maxRequests,
     tagId: value.tagId,
-    userId: value.userId,
     lassoIdCount: Array.isArray(value.lassoIds) ? value.lassoIds.length : undefined,
     tagsToAdd: value.tagsToAdd,
     tagsToRemove: value.tagsToRemove,

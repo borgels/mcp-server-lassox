@@ -311,10 +311,10 @@ export const LASSO_CAPABILITIES: LassoCapability[] = [
     id: 'lassox_lists_index',
     title: 'List Lassox Lists (Tags)',
     description:
-      'Fetch the Lassox lists (tags) visible to the account — id, name, entity count, and permissions. Lists are curated in the Lasso portal (e.g. via target-group search) and consumed here.',
+      'Fetch the Lassox lists (tags) visible to you — shared lists plus your own private lists when your identity is mapped to a Lassox user — with id, name, entity count, and permissions. Lists are curated in the Lasso portal (e.g. via target-group search) and consumed here.',
     risk: 'read',
-    examples: [{}, { userId: 'user-id-for-private-lists' }],
-    identifierFormats: ['Optional Lassox userId for private lists.'],
+    examples: [{}],
+    identifierFormats: ['No input; visibility is derived from the verified caller identity.'],
     safetyNotes: ['Read-only. Lists are created and curated in the Lasso portal; the API cannot create lists.'],
     keywords: ['lists', 'tags', 'lister', 'segments', 'portal', 'index'],
   },
@@ -342,6 +342,7 @@ export const LASSO_CAPABILITIES: LassoCapability[] = [
     identifierFormats: ['CVR-{1|2|3}-{id} Lasso IDs', 'tagId from lassox_lists_index.'],
     safetyNotes: [
       'WRITE operation: modifies list membership in the shared Lasso portal.',
+      'Disabled unless the server sets LASSO_ENABLE_WRITES=true; only lists visible to the caller can be changed.',
       'Non-destructive and idempotent per (entity, list) pair; CVR data itself is never modified.',
     ],
     keywords: ['add to list', 'remove from list', 'tag', 'untag', 'write', 'membership'],

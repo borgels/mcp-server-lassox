@@ -5,13 +5,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { searchCapabilities } from '../src/lasso/capabilities.js';
 import { LassoClient } from '../src/lasso/client.js';
 import { checkToolPolicy } from '../src/lasso/policy.js';
-import { registerCvrTools } from '../src/tools/cvr.js';
+import { registerCvrTools, type RegisterCvrToolsOptions } from '../src/tools/cvr.js';
 
 const originalAuditLog = process.env.LASSO_AUDIT_LOG;
 let tempDir: string | undefined;
 
 describe('Lassox tool hardening', () => {
   afterEach(async () => {
+    delete process.env.LASSO_ENABLE_WRITES;
     if (originalAuditLog === undefined) {
       delete process.env.LASSO_AUDIT_LOG;
     } else {
@@ -43,10 +44,15 @@ describe('Lassox tool hardening', () => {
       'teledata_lookup_phone',
       'lassox_lists_index',
       'lassox_list_get_entities',
-      'lassox_list_change',
       'cvr_get_changes',
       'cvr_get_related',
     ]);
+
+    // The write tool is only registered when explicitly enabled.
+    process.env.LASSO_ENABLE_WRITES = 'true';
+    expect(Object.keys(captureRegisteredTools())).toContain('lassox_list_change');
+    const withWrites = captureRegisteredTools();
+    Object.assign(registered, withWrites);
 
     const writeTools = new Set(['lassox_list_change']);
 
@@ -81,7 +87,12 @@ describe('Lassox tool hardening', () => {
     expect(checkToolPolicy('creditsafe_get_rating')).toMatchObject({ allowed: true });
     expect(checkToolPolicy('teledata_get_company_phones')).toMatchObject({ allowed: true });
     expect(checkToolPolicy('teledata_lookup_phone')).toMatchObject({ allowed: true });
-    expect(checkToolPolicy('lassox_list_change')).toMatchObject({
+    expect(checkToolPolicy('lassox_list_change', {})).toMatchObject({
+      allowed: false,
+      reason: expect.stringContaining('LASSO_ENABLE_WRITES'),
+    });
+    expect(checkToolPolicy('lassox_list_change', { LASSO_ENABLE_WRITES: 'false' })).toMatchObject({ allowed: false });
+    expect(checkToolPolicy('lassox_list_change', { LASSO_ENABLE_WRITES: 'true' })).toMatchObject({
       allowed: true,
       reason: 'allowlisted Lassox write tool (list membership only)',
     });
@@ -122,10 +133,65 @@ describe('Lassox tool hardening', () => {
   });
 });
 
-function captureRegisteredTools(): Record<
+describe('Lassox list tools identity scoping', () => {
+  afterEach(() => {
+    delete process.env.LASSO_ENABLE_WRITES;
+  });
+
+  it('does not accept a caller-supplied userId on lassox_lists_index', () => {
+    const registered = captureRegisteredTools();
+    const schema = registered.lassox_lists_index?.config.inputSchema as Record<string, unknown>;
+    expect(Object.keys(schema ?? {})).toEqual([]);
+  });
+
+  it('uses the server-derived scope and fails closed when it cannot be resolved', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async input => {
+      const url = new URL(String(input));
+      const userId = url.searchParams.get('userId');
+      return new Response(JSON.stringify(userId === 'u-alice' ? [{ id: 'alice1' }] : [{ id: 'shared1' }]), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+
+    const scoped = captureRegisteredTools({ getListScope: () => ({ userId: 'u-alice' }) }, fetchMock);
+    await scoped.lassox_lists_index!.handler({ userId: 'u-bob' });
+    const urls = fetchMock.mock.calls.map(call => String(call[0]));
+    expect(urls).toContain('https://example.test/tags?userId=u-alice');
+    expect(urls.some(url => url.includes('u-bob'))).toBe(false);
+
+    const denied = captureRegisteredTools(
+      {
+        getListScope: () => {
+          throw new Error('No verified caller identity.');
+        },
+      },
+      fetchMock,
+    );
+    await expect(denied.lassox_lists_index!.handler({})).rejects.toThrow('No verified caller identity');
+    await expect(denied.lassox_list_get_entities!.handler({ tagId: 'shared1' })).rejects.toThrow(
+      'No verified caller identity',
+    );
+  });
+
+  it('denies lassox_list_change at call time when writes are disabled', async () => {
+    process.env.LASSO_ENABLE_WRITES = 'true';
+    const registered = captureRegisteredTools();
+    delete process.env.LASSO_ENABLE_WRITES;
+
+    await expect(
+      registered.lassox_list_change!.handler({ lassoIds: ['CVR-1-1'], tagsToAdd: ['shared1'] }),
+    ).rejects.toThrow('LASSO_ENABLE_WRITES');
+  });
+});
+
+function captureRegisteredTools(
+  options?: RegisterCvrToolsOptions,
+  fetchMock: ReturnType<typeof vi.fn<typeof fetch>> = vi.fn<typeof fetch>(),
+): Record<
   string,
   {
-    config: { annotations?: unknown };
+    config: { annotations?: unknown; inputSchema?: unknown };
     handler: (input: Record<string, unknown>) => Promise<unknown>;
   }
 > {
@@ -144,10 +210,10 @@ function captureRegisteredTools(): Record<
   const client = new LassoClient({
     apiKey: 'test-key',
     baseUrl: 'https://example.test',
-    fetchImpl: vi.fn() as unknown as typeof fetch,
+    fetchImpl: fetchMock as unknown as typeof fetch,
   });
 
-  registerCvrTools(server as never, client);
+  registerCvrTools(server as never, client, options);
 
   return registered;
 }

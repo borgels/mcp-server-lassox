@@ -4,12 +4,21 @@ import { createServer as createMcpServer } from '../server.js';
 import {
   assertAllowedOrigin,
   assertAuthorized,
+  assertSafeStartupConfig,
   corsHeaders,
+  getForwardedUser,
   getHttpConfig,
   HttpRequestError,
   readJsonBody,
   sendJson,
 } from './http-helpers.js';
+
+try {
+  assertSafeStartupConfig();
+} catch (error) {
+  console.error(error instanceof Error ? error.message : error);
+  process.exit(1);
+}
 
 const config = getHttpConfig();
 
@@ -34,8 +43,9 @@ const httpServer = createNodeServer(async (req, res) => {
     }
 
     assertAuthorized(req, config);
+    const callerEmail = getForwardedUser(req);
     const body = await readJsonBody(req, config.maxBodyBytes);
-    const mcpServer = createMcpServer();
+    const mcpServer = createMcpServer({ callerEmail });
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
     });
