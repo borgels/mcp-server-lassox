@@ -3,6 +3,7 @@ import { LassoClient, type LassoClientOptions } from './lasso/client.js';
 import { getCvrEntity, getCvrEntityHistory, searchCvr } from './lasso/cvr.js';
 import { getCvrChanges } from './lasso/delta.js';
 import { getCvrReports, getFinancialAnalysis } from './lasso/financials.js';
+import { resolveListScope, type ListAccessScope } from './lasso/identity.js';
 import { changeListMembers, getListEntities, getLists } from './lasso/lists.js';
 import { getOwnershipGraph } from './lasso/network.js';
 import { searchCvrSegment } from './lasso/segment.js';
@@ -27,6 +28,22 @@ export interface GatewayToolResult {
 }
 
 export interface LassoxGatewayOptions extends LassoClientOptions {}
+
+export interface LassoxGatewayCallContext {
+  /**
+   * Gateway-verified caller email. Mapped to a Lassox user id via
+   * LASSO_USER_MAP to expose that user's private lists. Without it, list tools
+   * only see lists shared across the account.
+   */
+  user?: string;
+}
+
+function gatewayListScope(context: LassoxGatewayCallContext | undefined): ListAccessScope {
+  if (!context?.user?.trim()) {
+    return {};
+  }
+  return resolveListScope({ callerEmail: context.user, trustForwardedUser: true });
+}
 
 const emptySearchInput = {
   type: 'object',
@@ -160,12 +177,12 @@ export const lassoxGatewayTools: GatewayToolDefinition[] = [
   {
     name: 'lists_index',
     title: 'List Lasso X lists (tags)',
-    description: 'Fetch the Lasso X lists (tags) visible to the account.',
+    description: 'Fetch the Lasso X lists (tags) visible to the caller: shared lists plus their own private lists.',
     riskLevel: 'read',
     enabledByDefault: true,
     inputSchema: {
       type: 'object',
-      properties: { userId: { type: 'string' } },
+      properties: {},
       additionalProperties: false,
     },
   },
@@ -258,7 +275,11 @@ export function createLassoxGateway(options: LassoxGatewayOptions = {}) {
 
   return {
     tools: lassoxGatewayTools,
-    async callTool(toolName: string, input: GatewayJsonObject = {}): Promise<GatewayToolResult> {
+    async callTool(
+      toolName: string,
+      input: GatewayJsonObject = {},
+      context?: LassoxGatewayCallContext,
+    ): Promise<GatewayToolResult> {
       switch (toolName) {
         case 'search_capabilities':
           return jsonResult('Found Lasso X capabilities.', searchCapabilities(
@@ -288,13 +309,13 @@ export function createLassoxGateway(options: LassoxGatewayOptions = {}) {
           return jsonResult('Ran segment search.', await searchCvrSegment(client, input as unknown as Parameters<typeof searchCvrSegment>[1]));
 
         case 'lists_index':
-          return jsonResult('Fetched Lasso X lists.', await getLists(client, input as Parameters<typeof getLists>[1]));
+          return jsonResult('Fetched Lasso X lists.', await getLists(client, gatewayListScope(context)));
 
         case 'list_get_entities':
-          return jsonResult('Fetched list members.', await getListEntities(client, input as unknown as Parameters<typeof getListEntities>[1]));
+          return jsonResult('Fetched list members.', await getListEntities(client, input as unknown as Parameters<typeof getListEntities>[1], gatewayListScope(context)));
 
         case 'list_change':
-          return jsonResult('Changed list membership.', await changeListMembers(client, input as unknown as Parameters<typeof changeListMembers>[1]));
+          return jsonResult('Changed list membership.', await changeListMembers(client, input as unknown as Parameters<typeof changeListMembers>[1], gatewayListScope(context)));
 
         case 'cvr_get_changes':
           return jsonResult('Fetched CVR changes.', await getCvrChanges(client, input as unknown as Parameters<typeof getCvrChanges>[1]));

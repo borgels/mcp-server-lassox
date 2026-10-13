@@ -52,6 +52,15 @@ export LASSO_TIMEOUT_MS=30000
 export LASSO_AUDIT_LOG="/absolute/path/to/lassox-audit.jsonl"
 ```
 
+List access and writes (see [Lists and caller identity](#lists-and-caller-identity)):
+
+```sh
+export LASSO_ENABLE_WRITES=false            # set to true to enable lassox_list_change
+export LASSO_DEFAULT_USER_ID=""             # single-user deployments: whose private lists are visible
+export LASSO_TRUST_FORWARDED_USER=false     # HTTP behind a trusted gateway only
+export LASSO_USER_MAP="alice@example.com=lassox-user-id"
+```
+
 ## Claude Or Cursor Config
 
 Use the stdio server for local agent clients:
@@ -406,8 +415,10 @@ the Lasso portal's target-group search and consume it via the Lists tools below.
 
 ### `lassox_lists_index`
 
-Fetch the Lassox lists (tags) visible to the account — id, name, entity count,
-and permissions. Pass `userId` to read a specific user's private lists.
+Fetch the Lassox lists (tags) visible to the caller — lists shared across the
+account plus the caller's own private lists — with id, name, entity count, and
+permissions. The tool takes no user id; visibility is derived server-side (see
+[Lists and caller identity](#lists-and-caller-identity)).
 
 ```json
 {}
@@ -419,7 +430,8 @@ new lists.
 ### `lassox_list_get_entities`
 
 Fetch the members of a list with `skip`/`take` pagination and optional `fields`
-projection:
+projection. The `tagId` must be one of the lists returned by
+`lassox_lists_index` for the same caller:
 
 ```json
 {
@@ -434,6 +446,9 @@ projection:
 Add or remove entities to/from lists in bulk. **This is the only write tool in
 the server** — it changes Lassox list membership, never CVR data — and it is
 annotated `readOnlyHint: false` and separately allowlisted in the policy module.
+It is **disabled by default**: it is only registered (and allowed by the policy
+module) when the server sets `LASSO_ENABLE_WRITES=true`. Every list in
+`tagsToAdd`/`tagsToRemove` must be visible to the caller.
 
 ```json
 {
@@ -487,6 +502,31 @@ Bearer token. You can override this with `MCP_HTTP_HOST`, `MCP_MAX_BODY_BYTES`,
 
 The MCP endpoint is `POST http://127.0.0.1:3000/mcp`.
 
+`MCP_HTTP_TOKEN` is compared in constant time. When `LASSO_TRUST_FORWARDED_USER=true`
+the server refuses to start unless `MCP_HTTP_TOKEN` is set, and every request
+must carry a non-empty `X-MCP-User` header (otherwise `401`).
+
+## Lists and caller identity
+
+Lassox lists are either shared across the account or private to a Lassox user.
+The API key can read any user's private lists, so this server never accepts a
+user id from the caller. Instead:
+
+- **Behind a trusted gateway (HTTP)**: set `LASSO_TRUST_FORWARDED_USER=true`
+  and `MCP_HTTP_TOKEN`. The gateway-verified `X-MCP-User` email is mapped to a
+  Lassox user id via `LASSO_USER_MAP` (`email=userId` pairs separated by commas,
+  or a JSON object). Mapped callers see shared lists plus their own private
+  lists; unmapped callers see shared lists only; requests without the header
+  are rejected.
+- **Single-user deployments (stdio or HTTP without forwarded identity)**:
+  shared lists only, plus the private lists of `LASSO_DEFAULT_USER_ID` if set.
+- **Gateway export** (`mcp-server-lassox/gateway`): pass the verified caller as
+  `callTool(name, input, { user })`; it is mapped through `LASSO_USER_MAP` the
+  same way. Without a user only shared lists are visible.
+
+`lassox_list_get_entities` and `lassox_list_change` check every list id against
+the caller's visible lists before calling Lassox and fail closed otherwise.
+
 ## Verification
 
 Run the default checks without Lassox credentials:
@@ -512,7 +552,9 @@ Lassox documents a limit of 500 requests per minute per API key. If Lassox retur
 - `LASSO_API_KEY` is read only from the MCP server environment.
 - API keys are never accepted as tool arguments.
 - Error formatting redacts `lasso-api-key`, `LASSO_API_KEY`, and `apiKey`-style secret material.
-- CVR data is strictly read-only. The single write tool, `lassox_list_change`, only changes Lassox list membership and is separately allowlisted in the policy module and annotated `readOnlyHint: false`.
+- CVR data is strictly read-only. The single write tool, `lassox_list_change`, only changes Lassox list membership, is off unless `LASSO_ENABLE_WRITES=true`, is separately allowlisted in the policy module and annotated `readOnlyHint: false`.
+- List reads and changes are restricted to the lists visible to the caller (shared lists plus the caller's own); caller-supplied user ids are not accepted.
+- Caller-supplied identifiers used in URL paths are rejected if they are empty, `.`/`..`, or contain `/`, `\`, `?`, `#` or encoded dots/slashes.
 - If `LASSO_AUDIT_LOG` is set, each tool call writes JSONL audit events with timestamp, request id, tool name, action, target hash, status, and redacted error text. Raw search/entity inputs and API keys are not written to the audit log.
 - Report suspected vulnerabilities privately to <security@borgels.com>. Do not
   include API keys, personal data, or other secrets in public GitHub issues.
