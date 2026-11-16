@@ -78,6 +78,10 @@ describe('forwarded identity and startup checks', () => {
     expect(() => getForwardedUser({ headers: {} } as never, trust)).toThrow(HttpRequestError);
     expect(() => getForwardedUser({ headers: { 'x-mcp-user': '  ' } } as never, trust)).toThrow(HttpRequestError);
     expect(() => getForwardedUser({ headers: { 'x-mcp-user': ['a', 'b'] } } as never, trust)).toThrow(HttpRequestError);
+    // Node joins a repeated header into one comma-separated value.
+    expect(() => getForwardedUser({ headers: { 'x-mcp-user': 'alice@example.com, mallory@example.com' } } as never, trust)).toThrow(
+      /Invalid X-MCP-User/,
+    );
     expect(getForwardedUser({ headers: { 'x-mcp-user': 'alice@example.com' } } as never, trust)).toBe('alice@example.com');
 
     expect(getForwardedUser({ headers: { 'x-mcp-user': 'alice@example.com' } } as never, {})).toBeUndefined();

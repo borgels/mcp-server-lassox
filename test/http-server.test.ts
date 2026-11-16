@@ -100,6 +100,12 @@ describe('HTTP transport (integration)', () => {
       body: toolsList,
     });
     expect(ok.status).toBe(200);
+
+    const repeated = await send(port, {
+      headers: { ...mcpHeaders, Authorization: `Bearer ${TOKEN}`, 'X-MCP-User': 'alice@example.com, mallory@example.com' },
+      body: toolsList,
+    });
+    expect(repeated.status).toBe(400);
   });
 
   it('refuses to start with the trust flag but without a token, even with the escape hatch', async () => {

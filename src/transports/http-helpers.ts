@@ -191,8 +191,10 @@ export function assertSafeStartupConfig(env: Env = process.env, httpToken = env.
 /**
  * Returns the verified caller identity when LASSO_TRUST_FORWARDED_USER is
  * enabled. Fails closed (401) when trust is enabled and the header is
- * missing, empty or repeated. Returns undefined when trust is disabled (the
- * header is ignored).
+ * missing or empty, and (400) when it contains a comma: Node joins a repeated
+ * X-MCP-User header into one comma-separated string, and an email address
+ * never contains a comma. Returns undefined when trust is disabled (the header
+ * is ignored).
  */
 export function getForwardedUser(req: IncomingMessage, env: Env = process.env): string | undefined {
   if (env.LASSO_TRUST_FORWARDED_USER !== 'true') {
@@ -203,6 +205,9 @@ export function getForwardedUser(req: IncomingMessage, env: Env = process.env): 
   const value = typeof header === 'string' ? header.trim() : '';
   if (!value) {
     throw new HttpRequestError(401, 'Missing verified caller identity (X-MCP-User).');
+  }
+  if (value.includes(',')) {
+    throw new HttpRequestError(400, 'Invalid X-MCP-User value (repeated header or comma).');
   }
 
   return value;

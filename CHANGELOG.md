@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - HTTP: failed authentication is counted per client address; after the limit
   further failures get 429 with `Retry-After`. Valid tokens are never throttled.
 - HTTP: `Host` header check on loopback binds (DNS rebinding).
+- HTTP: with `LASSO_TRUST_FORWARDED_USER=true`, an `X-MCP-User` value containing a comma
+  (for example a repeated header, which Node joins) is rejected with 400.
 - Lassox client: redirects are never followed, so `lasso-api-key` is only sent to
   `LASSO_BASE_URL`. Error bodies are read up to 64 KB; the configured key is
   redacted by value before error text is truncated; query strings are not
@@ -265,7 +267,7 @@ transport for non-stdio clients.
 - No request or response bodies are logged by the server.
 
 [Unreleased]: https://github.com/Borgels/mcp-server-lassox/compare/v0.5.0...HEAD
-[0.5.0]: https://github.com/Borgels/mcp-server-lassox/compare/v0.4.0...v0.5.0
+[0.5.0]: https://github.com/Borgels/mcp-server-lassox/compare/v0.3.1...v0.5.0
 [0.3.1]: https://github.com/Borgels/mcp-server-lassox/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Borgels/mcp-server-lassox/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/Borgels/mcp-server-lassox/compare/v0.2.0...v0.2.1
