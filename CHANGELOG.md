@@ -7,7 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-16
+
+### Upgrade notes
+
+- The HTTP server refuses to start on a non-loopback bind (`MCP_HTTP_HOST`/`HOST`
+  other than 127.0.0.1/localhost/::1), or with `MCP_ALLOW_ANY_ORIGIN=true`, unless
+  `MCP_HTTP_TOKEN` is set. `MCP_HTTP_ALLOW_UNAUTHENTICATED=true` is an explicit
+  escape hatch for networks restricted by other means.
+- `MCP_HTTP_TOKEN` must be at least 32 printable ASCII characters
+  (e.g. `openssl rand -hex 32`).
+- `PORT`, `MCP_MAX_BODY_BYTES`, `LASSO_TIMEOUT_MS` and the boolean `MCP_*` flags are
+  validated; invalid values stop the server at startup instead of becoming NaN.
+- New optional variables: `MCP_HTTP_ALLOW_UNAUTHENTICATED`, `MCP_ALLOWED_HOSTS`,
+  `MCP_AUTH_FAILURE_LIMIT`, `MCP_AUTH_FAILURE_WINDOW_MS`.
+
 ### Security
+
+- HTTP: failed authentication is counted per client address; after the limit
+  further failures get 429 with `Retry-After`. Valid tokens are never throttled.
+- HTTP: `Host` header check on loopback binds (DNS rebinding).
+- Lassox client: redirects are never followed, so `lasso-api-key` is only sent to
+  `LASSO_BASE_URL`. Error bodies are read up to 64 KB; the configured key is
+  redacted by value before error text is truncated; query strings are not
+  included in error URLs.
+- Container images are published only after CI passes, with SBOM and provenance
+  attestations; GitHub Actions are pinned to commit SHAs.
+
+### Changed
+
+- HTTP: 401 responses carry `WWW-Authenticate: Bearer`; invalid JSON gets 400
+  (JSON-RPC parse error) instead of 500; oversized bodies get 413 before the body
+  is read when `Content-Length` is too large; `GET /healthz`; graceful shutdown
+  on SIGTERM/SIGINT; one log line per rejected request.
+- The server reports the package version.
+- Dependencies updated within their ranges.
+
+### Security (previously unreleased)
 
 - Lists tools no longer accept a caller-supplied `userId`. Visible lists are
   derived server-side (`LASSO_TRUST_FORWARDED_USER` + `LASSO_USER_MAP`, or
@@ -228,7 +264,8 @@ transport for non-stdio clients.
   never accepted as a tool argument.
 - No request or response bodies are logged by the server.
 
-[Unreleased]: https://github.com/Borgels/mcp-server-lassox/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/Borgels/mcp-server-lassox/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Borgels/mcp-server-lassox/compare/v0.4.0...v0.5.0
 [0.3.1]: https://github.com/Borgels/mcp-server-lassox/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Borgels/mcp-server-lassox/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/Borgels/mcp-server-lassox/compare/v0.2.0...v0.2.1

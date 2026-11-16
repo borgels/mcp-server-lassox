@@ -4,10 +4,10 @@ TypeScript MCP server for the Lassox CVR API. It is intentionally boring good:
 typed, documented, read-first, policy-aware, credential-sane, and
 audit-friendly.
 
-> **Disclaimer:** This is an independent, unofficial project by Borgels. Borgels
-> is not affiliated with, endorsed by, or supported by Lasso X. "Lassox" /
-> "Lasso X" and the CVR API are referenced only to describe what this server
-> talks to. You need your own Lassox API key, and use of the Lassox API is
+This is an independent, unofficial project. It is not developed, endorsed or supported by Lasso X.
+
+> "Lassox" / "Lasso X" and the CVR API are referenced only to describe what this
+> server talks to. You need your own Lassox API key, and use of the Lassox API is
 > subject to Lassox's own terms.
 
 ## Scope
@@ -495,10 +495,26 @@ The local stdio transport is the default for agent compatibility. A small Stream
 PORT=3000 LASSO_API_KEY="your-api-key" npm run dev:http
 ```
 
-By default the HTTP server binds to `127.0.0.1`, limits request bodies to 10 MiB,
-allows browser CORS only from loopback origins, and does not require an HTTP
-Bearer token. You can override this with `MCP_HTTP_HOST`, `MCP_MAX_BODY_BYTES`,
-`MCP_ALLOWED_ORIGINS`, `MCP_ALLOW_ANY_ORIGIN=true`, and `MCP_HTTP_TOKEN`.
+By default the HTTP server binds to `127.0.0.1`, limits request bodies to 10 MiB
+and allows browser CORS only from loopback origins. It refuses to start on any
+other bind address, or with `MCP_ALLOW_ANY_ORIGIN=true`, unless `MCP_HTTP_TOKEN`
+is set.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `MCP_HTTP_HOST` / `HOST` | `127.0.0.1` | Bind address. |
+| `PORT` | `3000` | Listen port. |
+| `MCP_HTTP_TOKEN` | – | Bearer token required on `/mcp`. At least 32 printable ASCII characters, e.g. `openssl rand -hex 32`. Required for any non-loopback bind and with `MCP_ALLOW_ANY_ORIGIN=true`. |
+| `MCP_HTTP_ALLOW_UNAUTHENTICATED` | `false` | Serve a non-loopback bind without a token (only when access is restricted by other means). |
+| `MCP_ALLOWED_ORIGINS` | localhost origins | Comma-separated exact `Origin` values allowed. Requests without `Origin` (server-to-server) are allowed. |
+| `MCP_ALLOW_ANY_ORIGIN` | `false` | Allow every origin (requires `MCP_HTTP_TOKEN`). |
+| `MCP_ALLOWED_HOSTS` | – | Comma-separated host names accepted in the `Host` header. Without it, a loopback bind only accepts localhost names and no check is done on other binds. |
+| `MCP_MAX_BODY_BYTES` | `10485760` | Maximum request body. |
+| `MCP_AUTH_FAILURE_LIMIT` | `20` | Failed authentication attempts per client address and window before further failures get 429; `0` disables. Valid tokens are never throttled. |
+| `MCP_AUTH_FAILURE_WINDOW_MS` | `60000` | Window for the limit above. |
+
+`GET /healthz` answers `{"status":"ok"}` without authentication. 401 responses carry
+`WWW-Authenticate: Bearer`; invalid JSON gets 400. The server shuts down gracefully on SIGTERM/SIGINT.
 
 The MCP endpoint is `POST http://127.0.0.1:3000/mcp`.
 
@@ -547,11 +563,19 @@ LASSO_API_KEY="your-api-key" npm run smoke:live
 
 Lassox documents a limit of 500 requests per minute per API key. If Lassox returns `429`, this server includes the `retry-after` value in the tool error message.
 
+## Security model
+
+- The server calls Lassox with one shared API key. Every caller acts with that key's access; forwarded identity (`LASSO_TRUST_FORWARDED_USER`) is only used to choose which private lists are visible.
+- Per-user authorization belongs in an identity-aware proxy or gateway in front of this server. `MCP_HTTP_TOKEN` only authenticates that caller; the proxy must strip `X-MCP-User` from client traffic and set it itself.
+- Tool access is not data access: disabling a tool limits what an agent can call, not what the API key can read.
+- The HTTP server does not terminate TLS. Run it on a private network or behind a TLS-terminating proxy.
+- Upstream redirects are never followed, so `lasso-api-key` is only sent to `LASSO_BASE_URL`.
+
 ## Security And Audit
 
 - `LASSO_API_KEY` is read only from the MCP server environment.
 - API keys are never accepted as tool arguments.
-- Error formatting redacts `lasso-api-key`, `LASSO_API_KEY`, and `apiKey`-style secret material.
+- Error formatting redacts the configured key by value as well as `lasso-api-key`, `LASSO_API_KEY`, and `apiKey`-style secret material, before error text is truncated. Error bodies are read up to 64 KB and error URLs omit query strings.
 - CVR data is strictly read-only. The single write tool, `lassox_list_change`, only changes Lassox list membership, is off unless `LASSO_ENABLE_WRITES=true`, is separately allowlisted in the policy module and annotated `readOnlyHint: false`.
 - List reads and changes are restricted to the lists visible to the caller (shared lists plus the caller's own); caller-supplied user ids are not accepted.
 - Caller-supplied identifiers used in URL paths are rejected if they are empty, `.`/`..`, or contain `/`, `\`, `?`, `#` or encoded dots/slashes.
