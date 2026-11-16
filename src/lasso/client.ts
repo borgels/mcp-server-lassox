@@ -1,4 +1,9 @@
-import { LassoHttpError } from '../errors.js';
+import { ConfigError, readEnvInteger } from '../config-env.js';
+import { describeUrl, LassoHttpError, registerSecret } from '../errors.js';
+
+/** Error responses are read up to this many bytes. */
+const MAX_ERROR_BODY_BYTES = 64 * 1024;
+const MAX_TIMEOUT_MS = 10 * 60 * 1000;
 
 export interface LassoClientOptions {
   apiKey?: string;
@@ -17,12 +22,16 @@ export class LassoClient {
 
   constructor(options: LassoClientOptions = {}) {
     this.apiKey = options.apiKey ?? process.env.LASSO_API_KEY;
+    registerSecret(this.apiKey);
     this.baseUrl = trimTrailingSlash(
       options.baseUrl ?? process.env.LASSO_BASE_URL ?? 'https://api.lassox.com',
     );
     assertSafeBaseUrl(this.baseUrl);
     this.fetchImpl = options.fetchImpl ?? fetch;
-    this.timeoutMs = options.timeoutMs ?? Number(process.env.LASSO_TIMEOUT_MS ?? 30_000);
+    this.timeoutMs = options.timeoutMs ?? readEnvInteger('LASSO_TIMEOUT_MS', 30_000, { max: MAX_TIMEOUT_MS });
+    if (!Number.isSafeInteger(this.timeoutMs) || this.timeoutMs < 1) {
+      throw new ConfigError('timeoutMs must be a positive integer.');
+    }
   }
 
   async get<T>(path: string, query?: Record<string, QueryValue>): Promise<T> {
@@ -71,6 +80,9 @@ export class LassoClient {
     const init: RequestInit = {
       method,
       headers,
+      // Never follow redirects: fetch would re-send the custom lasso-api-key
+      // header to wherever the Location points, including other origins.
+      redirect: 'manual',
       signal: AbortSignal.timeout(this.timeoutMs),
     };
 
@@ -81,9 +93,16 @@ export class LassoClient {
 
     const response = await this.fetchImpl(url, init);
 
-    const responseBody = await readResponseBody(response);
+    if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
+      void response.body?.cancel().catch(() => undefined);
+      throw new Error(
+        `Lassox API responded with a redirect (HTTP ${response.status}) for ${method} ${describeUrl(url)}; ` +
+          'redirects are not followed. Check LASSO_BASE_URL.',
+      );
+    }
 
     if (!response.ok) {
+      const responseBody = await readErrorBody(response);
       throw new LassoHttpError({
         status: response.status,
         url,
@@ -93,7 +112,57 @@ export class LassoClient {
       });
     }
 
-    return responseBody as T;
+    return (await readResponseBody(response)) as T;
+  }
+}
+
+/** Read at most `limit` bytes of the body; cancels the rest and reports whether it was longer. */
+async function readUpTo(response: Response, limit: number): Promise<{ bytes: Uint8Array; exceeded: boolean }> {
+  if (!response.body) {
+    return { bytes: new Uint8Array(0), exceeded: false };
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  let exceeded = false;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    if (total + value.byteLength > limit) {
+      chunks.push(value.subarray(0, limit - total));
+      total = limit;
+      exceeded = true;
+      await reader.cancel().catch(() => undefined);
+      break;
+    }
+    chunks.push(value);
+    total += value.byteLength;
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { bytes, exceeded };
+}
+
+/** Error bodies are read up to a small limit; JSON is parsed only when complete. */
+async function readErrorBody(response: Response): Promise<unknown> {
+  const { bytes, exceeded } = await readUpTo(response, MAX_ERROR_BODY_BYTES);
+  const text = new TextDecoder().decode(bytes);
+  if (!text) {
+    return null;
+  }
+  if (exceeded) {
+    return text;
+  }
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
   }
 }
 

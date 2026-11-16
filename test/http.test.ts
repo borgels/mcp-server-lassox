@@ -12,6 +12,7 @@ import {
 } from '../src/transports/http-helpers.js';
 
 const originalEnv = { ...process.env };
+const SECRET = 'secret-0123456789abcdef0123456789abcdef';
 
 describe('HTTP transport hardening', () => {
   afterEach(() => {
@@ -19,36 +20,32 @@ describe('HTTP transport hardening', () => {
   });
 
   it('binds to loopback and uses a 10 MiB request limit by default', () => {
-    delete process.env.HOST;
-    delete process.env.MCP_HTTP_HOST;
-    delete process.env.MCP_MAX_BODY_BYTES;
-
-    expect(getHttpConfig()).toMatchObject({
+    expect(getHttpConfig({})).toMatchObject({
       host: '127.0.0.1',
       maxBodyBytes: 10_485_760,
     });
   });
 
   it('allows loopback origins by default and supports explicit origin allowlists', () => {
-    expect(isOriginAllowed('http://localhost:5173')).toBe(true);
-    expect(isOriginAllowed('http://127.0.0.1:3000')).toBe(true);
-    expect(isOriginAllowed('https://evil.example')).toBe(false);
+    expect(isOriginAllowed('http://localhost:5173', {})).toBe(true);
+    expect(isOriginAllowed('http://127.0.0.1:3000', {})).toBe(true);
+    expect(isOriginAllowed('https://evil.example', {})).toBe(false);
 
-    process.env.MCP_ALLOWED_ORIGINS = 'https://app.example';
-    expect(isOriginAllowed('https://app.example')).toBe(true);
-    expect(isOriginAllowed('http://localhost:5173')).toBe(false);
+    const config = getHttpConfig({ MCP_ALLOWED_ORIGINS: 'https://app.example' });
+    expect(isOriginAllowed('https://app.example', config)).toBe(true);
+    expect(isOriginAllowed('http://localhost:5173', config)).toBe(false);
   });
 
   it('requires the optional HTTP token when configured', () => {
-    process.env.MCP_HTTP_TOKEN = 'secret';
-    expect(() => assertAuthorized({ headers: {} } as never)).toThrow(HttpRequestError);
+    const config = { httpToken: SECRET };
+    expect(() => assertAuthorized({ headers: {} } as never, config)).toThrow(HttpRequestError);
     expect(() =>
-      assertAuthorized({ headers: { authorization: 'Bearer secret' } } as never),
+      assertAuthorized({ headers: { authorization: `Bearer ${SECRET}` } } as never, config),
     ).not.toThrow();
   });
 
   it('rejects oversized JSON request bodies', async () => {
-    await expect(readJsonBody(Readable.from(['{"ok":true}']) as never, 4)).rejects.toMatchObject({
+    await expect(readJsonBody(Object.assign(Readable.from(['{"ok":true}']), { headers: {} }) as never, 4)).rejects.toMatchObject({
       status: 413,
     });
   });
@@ -64,9 +61,9 @@ describe('forwarded identity and startup checks', () => {
     expect(safeEqual('Bearer secreT', 'Bearer secret')).toBe(false);
     expect(safeEqual('', 'Bearer secret')).toBe(false);
 
-    process.env.MCP_HTTP_TOKEN = 'secret';
-    expect(() => assertAuthorized({ headers: { authorization: 'Bearer secret2' } } as never)).toThrow(HttpRequestError);
-    expect(() => assertAuthorized({ headers: { authorization: 'secret' } } as never)).toThrow(HttpRequestError);
+    const config = { httpToken: SECRET };
+    expect(() => assertAuthorized({ headers: { authorization: `Bearer ${SECRET}2` } } as never, config)).toThrow(HttpRequestError);
+    expect(() => assertAuthorized({ headers: { authorization: SECRET } } as never, config)).toThrow(HttpRequestError);
   });
 
   it('refuses to start when forwarded identity is trusted without MCP_HTTP_TOKEN', () => {
@@ -81,6 +78,10 @@ describe('forwarded identity and startup checks', () => {
     expect(() => getForwardedUser({ headers: {} } as never, trust)).toThrow(HttpRequestError);
     expect(() => getForwardedUser({ headers: { 'x-mcp-user': '  ' } } as never, trust)).toThrow(HttpRequestError);
     expect(() => getForwardedUser({ headers: { 'x-mcp-user': ['a', 'b'] } } as never, trust)).toThrow(HttpRequestError);
+    // Node joins a repeated header into one comma-separated value.
+    expect(() => getForwardedUser({ headers: { 'x-mcp-user': 'alice@example.com, mallory@example.com' } } as never, trust)).toThrow(
+      /Invalid X-MCP-User/,
+    );
     expect(getForwardedUser({ headers: { 'x-mcp-user': 'alice@example.com' } } as never, trust)).toBe('alice@example.com');
 
     expect(getForwardedUser({ headers: { 'x-mcp-user': 'alice@example.com' } } as never, {})).toBeUndefined();
