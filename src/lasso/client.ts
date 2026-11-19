@@ -1,8 +1,11 @@
 import { ConfigError, readEnvInteger } from '../config-env.js';
-import { describeUrl, LassoHttpError, registerSecret } from '../errors.js';
+import { LassoHttpError, limitDepth } from '../errors.js';
+import { describeUrl, discardBody, isRedirect, registerSecret, SecretRedactor } from '../upstream-http.js';
 
-/** Error responses are read up to this many bytes. */
-const MAX_ERROR_BODY_BYTES = 64 * 1024;
+/** Lasso X's production API. */
+export const DEFAULT_BASE_URL = 'https://api.lassox.com';
+/** Default request timeout. */
+export const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 10 * 60 * 1000;
 
 export interface LassoClientOptions {
@@ -10,6 +13,17 @@ export interface LassoClientOptions {
   baseUrl?: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  /**
+   * Where a missing apiKey, baseUrl or timeoutMs is read from. Default
+   * process.env (the MCP server). The gateway passes {}: an embedded instance
+   * never reads LASSO_API_KEY, LASSO_BASE_URL or LASSO_TIMEOUT_MS.
+   */
+  credentialEnv?: Readonly<Record<string, string | undefined>>;
+  /**
+   * The instance's own redactor (the gateway). Without one the key is
+   * redacted by the MCP server's process-wide redactor.
+   */
+  redactor?: SecretRedactor;
 }
 
 export type QueryValue = string | number | boolean | null | undefined;
@@ -20,17 +34,25 @@ export class LassoClient {
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
 
+  /** Redacts this client's key; the gateway runs every call with it in scope. */
+  readonly redactor: SecretRedactor;
+
   constructor(options: LassoClientOptions = {}) {
-    this.apiKey = options.apiKey ?? process.env.LASSO_API_KEY;
-    registerSecret(this.apiKey);
-    this.baseUrl = trimTrailingSlash(
-      options.baseUrl ?? process.env.LASSO_BASE_URL ?? 'https://api.lassox.com',
-    );
+    const env = options.credentialEnv ?? process.env;
+    this.apiKey = options.apiKey ?? env.LASSO_API_KEY;
+    this.redactor = options.redactor ?? new SecretRedactor();
+    this.redactor.addSecret(this.apiKey);
+    if (!options.redactor) {
+      // The MCP server: its errors are redacted outside any call scope.
+      registerSecret(this.apiKey);
+    }
+    this.baseUrl = trimTrailingSlash(options.baseUrl ?? env.LASSO_BASE_URL ?? DEFAULT_BASE_URL);
     assertSafeBaseUrl(this.baseUrl);
     this.fetchImpl = options.fetchImpl ?? fetch;
-    this.timeoutMs = options.timeoutMs ?? readEnvInteger('LASSO_TIMEOUT_MS', 30_000, { max: MAX_TIMEOUT_MS });
-    if (!Number.isSafeInteger(this.timeoutMs) || this.timeoutMs < 1) {
-      throw new ConfigError('timeoutMs must be a positive integer.');
+    this.timeoutMs =
+      options.timeoutMs ?? readEnvInteger('LASSO_TIMEOUT_MS', DEFAULT_TIMEOUT_MS, { max: MAX_TIMEOUT_MS }, { ...env });
+    if (!Number.isSafeInteger(this.timeoutMs) || this.timeoutMs < 1 || this.timeoutMs > MAX_TIMEOUT_MS) {
+      throw new ConfigError('timeoutMs must be a positive integer of at most 600000.');
     }
   }
 
@@ -91,97 +113,113 @@ export class LassoClient {
       init.body = JSON.stringify(body);
     }
 
-    const response = await this.fetchImpl(url, init);
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url, init);
+    } catch (error) {
+      throw transportError(error, method, this.timeoutMs);
+    }
 
-    if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
-      void response.body?.cancel().catch(() => undefined);
+    if (response.type === 'opaqueredirect' || isRedirect(response.status)) {
+      // The Location is Lasso X's text and is never quoted, and the address is configuration.
+      await discardBody(response);
       throw new Error(
-        `Lassox API responded with a redirect (HTTP ${response.status}) for ${method} ${describeUrl(url)}; ` +
-          'redirects are not followed. Check LASSO_BASE_URL.',
+        `Lasso X API responded with a redirect (HTTP ${response.status}) for ${method}; ` +
+          'redirects are not followed, so the key is never sent to another host. Check the configured base URL.',
       );
     }
 
     if (!response.ok) {
-      const responseBody = await readErrorBody(response);
+      // The body is Lasso X's text: it is never read into an error, a result or an audit record.
+      await discardBody(response);
       throw new LassoHttpError({
         status: response.status,
-        url,
-        payload: responseBody,
+        method,
+        url: describeUrl(url),
         retryAfter: response.headers.get('retry-after') ?? undefined,
-        fallbackMessage: typeof responseBody === 'string' ? responseBody : undefined,
       });
     }
 
-    return (await readResponseBody(response)) as T;
+    return (await readResponseBody(response, method)) as T;
   }
 }
 
-/** Read at most `limit` bytes of the body; cancels the rest and reports whether it was longer. */
-async function readUpTo(response: Response, limit: number): Promise<{ bytes: Uint8Array; exceeded: boolean }> {
-  if (!response.body) {
-    return { bytes: new Uint8Array(0), exceeded: false };
+/** System error codes a network error may name: a fixed list, so no other text from a cause is ever shown. */
+const SHOWN_NETWORK_CODES: ReadonlySet<string> = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ECONNABORTED',
+  'ETIMEDOUT',
+  'EPIPE',
+  'EAI_AGAIN',
+  'ENOTFOUND',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_BODY_TIMEOUT',
+  'UND_ERR_SOCKET',
+  'CERT_HAS_EXPIRED',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'ERR_TLS_CERT_ALTNAME_INVALID',
+]);
+
+/** A network failure in our own words: only a system error code from a fixed list, never a message. */
+function transportError(error: unknown, method: string, timeoutMs: number): Error {
+  // The address is configuration and is not quoted.
+  if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
+    return timeoutError(`Lasso X API request timed out after ${timeoutMs} ms (${method}).`);
   }
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  let exceeded = false;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-    if (total + value.byteLength > limit) {
-      chunks.push(value.subarray(0, limit - total));
-      total = limit;
-      exceeded = true;
-      await reader.cancel().catch(() => undefined);
-      break;
-    }
-    chunks.push(value);
-    total += value.byteLength;
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return { bytes, exceeded };
+  const code = error instanceof Error ? (error.cause as { code?: unknown } | undefined)?.code : undefined;
+  const shown = typeof code === 'string' && SHOWN_NETWORK_CODES.has(code) ? ` (${code})` : '';
+  return new Error(`Network error calling the Lasso X API (${method})${shown}.`);
 }
 
-/** Error bodies are read up to a small limit; JSON is parsed only when complete. */
-async function readErrorBody(response: Response): Promise<unknown> {
-  const { bytes, exceeded } = await readUpTo(response, MAX_ERROR_BODY_BYTES);
-  const text = new TextDecoder().decode(bytes);
+/** Our own text for a timeout, named TimeoutError so the audit records it as `timeout`. */
+function timeoutError(message: string): Error {
+  const error = new Error(message);
+  error.name = 'TimeoutError';
+  return error;
+}
+
+/** Whether a content type is JSON: application/json or a +json type, with or without parameters. */
+function isJsonContentType(contentType: string): boolean {
+  const type = contentType.split(';')[0]?.trim().toLowerCase() ?? '';
+  return type === 'application/json' || (type.startsWith('application/') && type.endsWith('+json'));
+}
+
+/**
+ * Reads a successful response body: empty (null) or JSON (depth-limited). Anything else (another content type, or
+ * JSON that does not parse) is refused with a fixed text: it would reach the caller without the masking that applies
+ * to data.
+ */
+async function readResponseBody(response: Response, method: string): Promise<unknown> {
+  let text: string;
+  try {
+    text = await response.text();
+  } catch (error) {
+    // Anything thrown while reading the body is replaced by our own text: its message is not ours.
+    if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
+      throw timeoutError(`Lasso X API response timed out while it was being read (${method}).`);
+    }
+    throw new Error(`The Lasso X API response could not be read (${method}).`);
+  }
+
   if (!text) {
     return null;
   }
-  if (exceeded) {
-    return text;
-  }
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return text;
-  }
-}
 
-async function readResponseBody(response: Response): Promise<unknown> {
-  const text = await response.text();
-
-  if (!text) {
-    return null;
-  }
-
-  const contentType = response.headers.get('content-type') ?? '';
-  if (!contentType.includes('application/json')) {
-    return text;
+  if (!isJsonContentType(response.headers.get('content-type') ?? '')) {
+    throw new Error(`Lasso X API answered with a content type this server does not read (${method}).`);
   }
 
   try {
-    return JSON.parse(text) as unknown;
+    // Depth-limited at once, so nothing downstream (a handler's JSON text, the gateway) can exhaust the stack.
+    return limitDepth(JSON.parse(text) as unknown);
   } catch {
-    return text;
+    throw new Error(`Lasso X API answered with JSON that could not be read (${method}).`);
   }
 }
 
@@ -198,7 +236,8 @@ function assertSafeBaseUrl(baseUrl: string): void {
   try {
     parsed = new URL(baseUrl);
   } catch {
-    throw new Error(`LASSO_BASE_URL is not a valid URL: ${baseUrl}`);
+    // The value is not quoted: configuration is never echoed.
+    throw new Error('The Lasso X base URL is not a valid URL.');
   }
 
   if (parsed.protocol === 'https:') {
@@ -210,7 +249,7 @@ function assertSafeBaseUrl(baseUrl: string): void {
   }
 
   throw new Error(
-    `Refusing to send the Lassox API key over ${parsed.protocol}//. Use https:// (loopback http:// is allowed for local mocks).`,
+    'Refusing to send the Lasso X API key over a connection that is not https. Use https:// (loopback http:// is allowed for local mocks).',
   );
 }
 

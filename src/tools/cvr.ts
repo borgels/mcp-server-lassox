@@ -1,6 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod/v4';
-import { formatUnknownError } from '../errors.js';
 import { writeAuditEvent } from '../lasso/audit.js';
 import { searchCapabilities, TOOL_ANNOTATIONS, WRITE_TOOL_ANNOTATIONS } from '../lasso/capabilities.js';
 import type { LassoClient } from '../lasso/client.js';
@@ -20,6 +19,7 @@ import { changeListMembers, getListEntities, getLists, MAX_LIST_CHANGE_IDS } fro
 import { getCvrNetwork, getOwnershipGraph } from '../lasso/network.js';
 import type { ListAccessScope } from '../lasso/identity.js';
 import { checkToolPolicy, writesEnabled } from '../lasso/policy.js';
+import { currentOfferedTools } from '../lasso/scope.js';
 import {
   DEFAULT_SEGMENT_REQUEST_BUDGET,
   MAX_SEGMENT_REQUEST_BUDGET,
@@ -101,6 +101,11 @@ export interface RegisterCvrToolsOptions {
    * shared lists only.
    */
   getListScope?: () => ListAccessScope;
+  /**
+   * Register the write tool (lassox_list_change). Default: LASSO_ENABLE_WRITES=true. The gateway always registers it;
+   * the policy check refuses it at call time unless the host enabled writes.
+   */
+  registerWriteTools?: boolean;
 }
 
 export function registerCvrTools(server: McpServer, client: LassoClient, options: RegisterCvrToolsOptions = {}): void {
@@ -120,7 +125,7 @@ export function registerCvrTools(server: McpServer, client: LassoClient, options
     },
     async input =>
       runAuditedTool('lassox_search_capabilities', input, async () =>
-        jsonToolResult(searchCapabilities(input.query, input.limit)),
+        jsonToolResult(searchCapabilities(input.query, input.limit, currentOfferedTools())),
       ),
   );
 
@@ -458,7 +463,7 @@ export function registerCvrTools(server: McpServer, client: LassoClient, options
   );
 
   // Write tools are opt-in (LASSO_ENABLE_WRITES=true); the policy check also denies them at call time.
-  if (writesEnabled()) {
+  if (options.registerWriteTools ?? writesEnabled()) {
     server.registerTool(
       'lassox_list_change',
       {
@@ -562,7 +567,8 @@ async function runAuditedTool<T>(tool: string, input: unknown, call: () => Promi
       action: 'error',
       target,
       status: 'error',
-      error: formatUnknownError(error),
+      // The error object itself: the audit classifies it into a fixed code (http_<status>, timeout or error).
+      error,
     });
     throw error;
   }

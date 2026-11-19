@@ -1,11 +1,14 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { appendFile } from 'node:fs/promises';
-import { formatUnknownError } from '../errors.js';
+import { redactDeep } from '../errors.js';
+import { withheldAuditRecord } from '../fallbacks.js';
+import { leaksSecret } from '../key-admission.js';
+import { currentCallContext, currentInstancePolicy, currentRedactor } from './scope.js';
 
 export interface LassoAuditEvent {
   requestId?: string;
   tool: string;
-  action: 'start' | 'finish' | 'error' | 'policy_denied';
+  action: 'start' | 'finish' | 'error' | 'policy_denied' | 'rejected';
   target?: unknown;
   status?: string;
   retryAfter?: string;
@@ -13,25 +16,79 @@ export interface LassoAuditEvent {
   error?: unknown;
 }
 
+/**
+ * The audit's code for an error: the HTTP status of a Lasso X error, `timeout`, or `error`. Only codes from this
+ * fixed set are written; the error's message never is.
+ */
+export function auditErrorCode(error: unknown): string {
+  const status = (error as { status?: unknown } | null)?.status;
+  if (error instanceof Error && error.name === 'LassoHttpError' && typeof status === 'number' && Number.isInteger(status)) {
+    return `http_${status}`;
+  }
+  if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) return 'timeout';
+  return 'error';
+}
+
+/** The key of the caller pseudonyms: random per process, never written anywhere. */
+const CALLER_KEY = randomBytes(32);
+
+/** The caller as `hmac:` and 16 hex characters: the same caller gives the same pseudonym within the process. */
+export function callerPseudonym(caller: string | undefined): string | undefined {
+  if (caller === undefined || caller === '') return undefined;
+  return `hmac:${createHmac('sha256', CALLER_KEY).update(caller, 'utf8').digest('hex').slice(0, 16)}`;
+}
+
+/**
+ * Append one JSON line to LASSO_AUDIT_LOG (no-op when unset). Inside a
+ * gateway call the record goes to the host policy's `audit` sink instead
+ * (no-op without one), and LASSO_AUDIT_LOG is not read. Caller and request id
+ * come from the gateway call's context when there is one.
+ *
+ * Every string in the record, keys included, has the instance's secrets
+ * redacted before it reaches the sink or the file: a key can reach a record
+ * through a tool name, the caller or a reason, not only through an error.
+ *
+ * A failing sink or file throws, so a tool whose start record cannot be
+ * written does not run.
+ */
 export async function writeAuditEvent(event: LassoAuditEvent): Promise<void> {
-  const auditPath = process.env.LASSO_AUDIT_LOG;
-  if (!auditPath) {
+  const hosted = currentInstancePolicy();
+  const sink = hosted?.audit;
+  const auditPath = hosted ? undefined : process.env.LASSO_AUDIT_LOG;
+  if (!sink && !auditPath) {
     return;
   }
 
+  const context = currentCallContext();
   const record = {
     timestamp: new Date().toISOString(),
-    requestId: event.requestId ?? randomUUID(),
+    requestId: event.requestId ?? context.requestId ?? randomUUID(),
     tool: event.tool,
+    // Only as a pseudonym: the caller is the host's text, often a mail address.
+    caller: callerPseudonym(context.caller),
     action: event.action,
-    targetHash: event.target === undefined ? undefined : hashValue(JSON.stringify(event.target)),
+    targetHash: event.target === undefined ? undefined : hashValue(JSON.stringify(event.target) ?? ''),
     status: event.status,
     retryAfter: event.retryAfter,
     reason: event.reason,
-    error: event.error === undefined ? undefined : formatUnknownError(event.error),
+    // A fixed code, never the error's message: a failing sink or handler can carry any text.
+    error: event.error === undefined ? undefined : auditErrorCode(event.error),
   };
+  // Redacted with the shared redactDeep (the call scope's redactor, numbers and depth included), then copied
+  // through JSON: plain data, without undefined fields, that the server does not keep. The second pass is the final
+  // one, over the assembled record.
+  const safe = JSON.parse(JSON.stringify(redactDeep(redactDeep(record)))) as Record<string, unknown>;
 
-  await appendFile(auditPath, `${JSON.stringify(record)}\n`, 'utf8');
+  // The sink check (src/key-admission.ts), on the record and the line in their final form: one that holds a piece of
+  // the key is replaced by a fixed record.
+  const redactor = currentRedactor();
+  const leaks = (value: unknown) => redactor !== undefined && leaksSecret(value, redactor);
+  if (sink) {
+    await sink(leaks(safe) ? withheldAuditRecord() : safe);
+  } else if (auditPath) {
+    const line = JSON.stringify(safe);
+    await appendFile(auditPath, `${leaks(line) ? JSON.stringify(withheldAuditRecord()) : line}\n`, 'utf8');
+  }
 }
 
 function hashValue(value: string): string {

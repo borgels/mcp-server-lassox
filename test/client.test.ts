@@ -72,7 +72,7 @@ describe('LassoClient', () => {
     }
   });
 
-  it('keeps non-JSON failure bodies in the error message', async () => {
+  it('never carries the failure body in the error message, only the status', async () => {
     const fetchMock = vi.fn<typeof fetch>(
       async () =>
         new Response('upstream unavailable', {
@@ -88,7 +88,7 @@ describe('LassoClient', () => {
       fetchImpl: fetchMock as unknown as typeof fetch,
     });
 
-    await expect(client.get('/CVR-1-34580820')).rejects.toThrow(/upstream unavailable/);
+    await expect(client.get('/CVR-1-34580820')).rejects.toThrow(/^Lasso X API request failed with HTTP 503$/);
   });
 
   it('redacts API key material from formatted errors', async () => {
@@ -214,3 +214,20 @@ function jsonResponse(payload: unknown, status = 200, headers: Record<string, st
     },
   });
 }
+
+describe('credential masking with = and : inside the value', () => {
+  it('masks the whole value of Basic, Bearer and credential assignments, padding included', async () => {
+    const { redactCredentialPatterns } = await import('../src/errors.js');
+    const padded1 = Buffer.from('abcd:efg').toString('base64');
+    const padded2 = Buffer.from('abcd:ef').toString('base64');
+    const cases: Array<[string, string]> = [
+      [`Basic ${padded1}`, 'Basic [REDACTED]'],
+      [`basic ${padded2}`, 'basic [REDACTED]'],
+      ['Bearer abcdefgh12345678==', 'Bearer [REDACTED]'],
+      ['secret=qzx:defghij', 'secret= [REDACTED]'],
+      ['lasso-api-key: qzw=ss:word', 'lasso-api-key: [REDACTED]'],
+      ['LASSO_API_KEY=qzv==', 'LASSO_API_KEY= [REDACTED]'],
+    ];
+    for (const [text, expected] of cases) expect(redactCredentialPatterns(text), text).toBe(expected);
+  });
+});

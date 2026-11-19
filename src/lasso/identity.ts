@@ -85,7 +85,7 @@ export function normalizeEmail(value: string | undefined): string {
 export interface ResolveListScopeInput {
   callerEmail?: string;
   env?: NodeJS.ProcessEnv;
-  /** Force forwarded-identity semantics regardless of env (used by the gateway export). */
+  /** Force forwarded-identity semantics regardless of env. The gateway export never calls resolveListScope (see src/lasso/scope.ts). */
   trustForwardedUser?: boolean;
 }
 
