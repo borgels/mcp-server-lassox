@@ -367,14 +367,16 @@ export const LASSO_CAPABILITIES: LassoCapability[] = [
   },
 ];
 
-export function searchCapabilities(query: string, limit = 20): LassoCapability[] {
+/** Capabilities matching the query, best first; only those in `offered` when it is given (a gateway instance). */
+export function searchCapabilities(query: string, limit = 20, offered?: ReadonlySet<string>): LassoCapability[] {
   const normalized = query.trim().toLowerCase();
+  const capabilities = LASSO_CAPABILITIES.filter(capability => !offered || offered.has(capability.id));
 
   if (!normalized) {
-    return LASSO_CAPABILITIES.slice(0, limit);
+    return capabilities.slice(0, limit);
   }
 
-  return LASSO_CAPABILITIES.map(capability => ({
+  return capabilities.map(capability => ({
     capability,
     score: scoreCapability(capability, normalized),
   }))

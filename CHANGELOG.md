@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-20
+
+The gateway entry point (`./gateway`) in the shape of `mcp-server-template`,
+for hosts that run one instance per tenant in a shared process (as
+mcp-server-pleo 0.3.0).
+
+### Changed
+
+- `createLassoxGateway({ apiKey, baseUrl?, fetchImpl?, timeoutMs?, policy? })`:
+  `apiKey` is required and never read from `LASSO_API_KEY`; `baseUrl`
+  defaults to `https://api.lassox.com` and `timeoutMs` to 30000, neither read
+  from the environment. A gateway instance reads no `LASSO_*` variable.
+- Key admission: printable ASCII, at least 16 characters, no piece of 6
+  characters shared with the server's own texts, its fixed fallbacks or the
+  tool list. A refused key throws `GatewayConfigError` at construction with a
+  fixed text that holds no piece of it; construction errors are sealed (no
+  `cause`, no stack frames).
+- Host policy `{ enableWrites, disabledTools, audit }` per instance;
+  `LASSO_ENABLE_WRITES` and `LASSO_AUDIT_LOG` are not read by a gateway.
+  `list_change` stays `write`, off by default, and runs only with
+  `policy.enableWrites: true`. Every call runs in its own call scope.
+- Lists in the gateway: no user mapping from the environment
+  (`LASSO_USER_MAP`, `LASSO_DEFAULT_USER_ID`, `LASSO_TRUST_FORWARDED_USER`).
+  Without `lassoUserId` in the call context only shared lists are visible and
+  changeable. The `user` call-context field is gone.
+- `lassoxToolCatalog`: deeply frozen, with `inputSchema` derived from the zod
+  schema the call is validated with (strict: unknown fields are refused),
+  `upstream` (method and path template of every Lasso X request) and
+  `broad` (false for every tool). `lassoxGatewayTools` stays.
+- Handlers, schemas, policy and audit are shared with the MCP server; the
+  gateway no longer has its own switch over tool names. Names are accepted as
+  gateway or MCP server names.
+- Results: data redacted twice against the instance's key and for
+  credential-shaped text, then checked at the sink (a result still holding a
+  piece of the key is withheld); the text block holds a short summary
+  followed by the data as compact JSON, equal to `structuredContent`.
+- Errors are our own texts, also in the MCP server: an HTTP failure reads
+  `Lasso X API request failed with HTTP <status>` with our hint and the parsed
+  `retry-after`, never Lasso X's response body, message, error code or help
+  link. Redirects, network failures and timeouts are worded by us and quote
+  neither the address nor the cause. A successful answer that is not JSON is
+  refused.
+- The audit records a failure as a fixed code (`http_<status>`, `timeout` or
+  `error`) and the caller only as an HMAC pseudonym; an unknown tool as
+  `unknown_tool`.
+- `search_capabilities` in a gateway lists only the tools the instance offers.
+
+### Upgrade notes
+
+- `createLassoxGateway()` without `apiKey` now throws. `LASSO_API_KEY`,
+  `LASSO_BASE_URL`, `LASSO_TIMEOUT_MS`, `LASSO_ENABLE_WRITES`,
+  `LASSO_AUDIT_LOG` and the list user variables are ignored by the gateway.
+- `callTool(name, input, { user })` is replaced by `{ caller, requestId,
+  lassoUserId }`; a host that relied on `LASSO_USER_MAP` passes the mapped
+  Lasso X user id as `lassoUserId`.
+- Gateway input schemas are the MCP server's: enums and formats are enforced,
+  and unknown fields are refused instead of ignored.
+- Error texts no longer include Lasso X's error message, error code, help
+  link or the request URL.
+
+
 ## [0.5.0] - 2026-11-16
 
 ### Upgrade notes

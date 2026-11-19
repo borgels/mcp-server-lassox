@@ -212,7 +212,7 @@ The response summarises the run and preserves input order:
   "results": [
     { "index": 0, "label": "CVR-1-34580820", "ok": true, "data": { } },
     { "index": 1, "label": "CVR-1-24256790", "ok": true, "data": { } },
-    { "index": 2, "label": "CVR-3-4004094652", "ok": false, "error": "Lassox API request failed with HTTP 404 ..." }
+    { "index": 2, "label": "CVR-3-4004094652", "ok": false, "error": "Lasso X API request failed with HTTP 404 | Lasso X found nothing at this address. Check the ids." }
   ]
 }
 ```
@@ -536,9 +536,12 @@ user id from the caller. Instead:
   are rejected.
 - **Single-user deployments (stdio or HTTP without forwarded identity)**:
   shared lists only, plus the private lists of `LASSO_DEFAULT_USER_ID` if set.
-- **Gateway export** (`mcp-server-lassox/gateway`): pass the verified caller as
-  `callTool(name, input, { user })`; it is mapped through `LASSO_USER_MAP` the
-  same way. Without a user only shared lists are visible.
+- **Gateway export** (`mcp-server-lassox/gateway`): no mapping from the
+  environment (`LASSO_USER_MAP`, `LASSO_DEFAULT_USER_ID` and
+  `LASSO_TRUST_FORWARDED_USER` are not read). Without a Lasso X user id from
+  the host only shared lists are visible and changeable; the host may name one
+  per call with `callTool(name, input, { lassoUserId })` (see
+  [Embedding](#embedding-gateway)).
 
 `lassox_list_get_entities` and `lassox_list_change` check every list id against
 the caller's visible lists before calling Lassox and fail closed otherwise.
@@ -561,7 +564,122 @@ LASSO_API_KEY="your-api-key" npm run smoke:live
 
 ## Rate Limits
 
-Lassox documents a limit of 500 requests per minute per API key. If Lassox returns `429`, this server includes the `retry-after` value in the tool error message.
+Lassox documents a limit of 500 requests per minute per API key. If Lassox returns `429`, this server includes the `retry-after` value (whole seconds) in the tool error message.
+
+## Embedding (`./gateway`)
+
+`mcp-server-lassox/gateway` lets a host application run the tools in-process
+instead of over MCP, in the same shape as `mcp-server-template`. One process
+can run several gateway instances, for example one per tenant.
+
+```ts
+import { createLassoxGateway, lassoxToolCatalog } from 'mcp-server-lassox/gateway';
+
+const gateway = createLassoxGateway({ apiKey: tenant.lassoApiKey, policy: { audit: record => log(record) } });
+const result = await gateway.callTool('cvr_get_entity', { lassoId: 'CVR-1-34580820' }, { caller: 'user-1', requestId: 'r-1' });
+```
+
+The module exports:
+
+- `createLassoxGateway({ apiKey, baseUrl?, fetchImpl?, timeoutMs?, policy? })`.
+  `apiKey` is the customer's Lasso X API key, sent as the `lasso-api-key`
+  header. It is required and never read from `LASSO_API_KEY`. `baseUrl`
+  defaults to `https://api.lassox.com` and is never read from
+  `LASSO_BASE_URL`; `timeoutMs` defaults to 30000 and is never read from
+  `LASSO_TIMEOUT_MS`. A gateway instance reads no `LASSO_*` variable at all.
+- `gateway.tools` (the tools enabled on the instance) and
+  `gateway.callTool(name, input, { caller, requestId, lassoUserId })`. Names
+  are accepted as the gateway name (`lists_index`) or the MCP server name
+  (`lassox_lists_index`), in any case. Input is validated with the tool's zod
+  schema before anything is sent, and unknown fields are refused. The audit
+  records of the call hold `caller` only as an HMAC pseudonym (a per-process
+  key) and a request id of the server's own, the same for every record of the
+  call; the host's `requestId` is not written. An error is recorded as a fixed
+  code (`http_<status>`, `timeout` or `error`), never as its message.
+- `lassoxGatewayTools`: the definitions (`name`, `title`, `description`,
+  `riskLevel`, `enabledByDefault`, `inputSchema` as JSON Schema derived from
+  the zod schema the call is validated with).
+- `lassoxToolCatalog`: the same tools, deeply frozen, with `upstream` (method
+  and path template of every Lasso X request the tool may make) and `broad`
+  (true when the input chooses what kind of thing is read). Hosts can build
+  their own permission model from it without creating an instance.
+- `GatewayConfigError` and the types (`LassoxGatewayOptions`, `LassoxGateway`,
+  `InstancePolicy`, `AuditSink`, `GatewayToolDefinition`,
+  `GatewayToolCatalogEntry`, `GatewayUpstreamOperation`, `GatewayToolResult`,
+  `GatewayCallContext` and the JSON types).
+
+| Tool | Risk | Default | Broad | Lasso X requests |
+|---|---|---|---|---|
+| `search_capabilities` | read | on | no | none |
+| `cvr_search` | read | on | no | `GET /data/cvr/search` |
+| `cvr_get_entity` | read | on | no | `GET /{lassoId}` |
+| `cvr_get_entity_history` | read | on | no | `GET /{lassoId}/history` |
+| `cvr_get_reports` | read | on | no | `GET /{lassoId}/reports` |
+| `financial_analysis` | read | on | no | `POST /modules/reportanalysis/{lassoId}` |
+| `cvr_segment_search` | read | on | no | `GET /data/cvr/search`, `GET /{lassoId}` |
+| `lists_index` | read | on | no | `GET /tags` |
+| `list_get_entities` | read | on | no | `GET /tags`, `GET /tags/{tagId}/entities` |
+| `list_change` | write | off | no | `GET /tags`, `POST /tags/change` |
+| `cvr_get_changes` | read | on | no | `GET /data/cvr/{company,person,place}/delta[/history]`, `GET /data/cvr/reports/delta` |
+| `ownership_graph` | read | on | no | `POST /modules/relations/graph` |
+
+No tool is broad: each reads one fixed kind of Lasso X data, whatever the
+input. `cvr_get_changes` returns many entities at once, but only the CVR
+change feed its name says; `cvr_segment_search` reads only CVR company
+records. Creditsafe, Teledata, the batch read, the person network and the
+related-entities read stay in the MCP server only.
+
+**Lists.** The gateway has no user mapping from the environment. Without
+`lassoUserId` in the call context, `lists_index`, `list_get_entities` and
+`list_change` see and change only lists shared across the account. With
+`lassoUserId` (a Lasso X user id the host has decided this caller may act as)
+they also see and change that user's private lists, for that call only. The
+id is never taken from tool input.
+
+**Instance policy.** With `policy: { enableWrites, disabledTools, audit }`
+the host decides the instance's policy: `list_change` runs only with
+`enableWrites: true`, the disabled tools are left out of `tools` (and out of
+`search_capabilities`) and refused when called, and the audit records go to
+`audit` (none without it). `disabledTools` must name gateway tools. A sink
+that throws on a start record refuses the call. Without `policy` the instance
+has writes off, no disabled tools and no audit; `LASSO_ENABLE_WRITES` and
+`LASSO_AUDIT_LOG` are never read. Every call runs in a call scope of its own
+(AsyncLocalStorage), so a call made from inside another instance's call never
+inherits its policy, sink, redactor, caller or list user. There is no
+process-wide registry of keys.
+
+**Results.** A successful result has `structuredContent` and one text block:
+a short summary, a blank line, and the same data as compact JSON. The data
+is redacted twice against the instance's key (exact value, URL- and
+JSON-encoded forms and any piece of 6 characters or more, in strings, object
+keys and the string form of numbers and booleans) and for credential-shaped
+text before it is serialised.
+
+**Errors.** An error result carries our own English text, never Lasso X's
+response body, message, error code or help link, nor a redirect's `Location`
+or the configured address. An HTTP failure reads
+`Lasso X API request failed with HTTP <status>`, followed by
+` | <our hint>` for 401, 402, 403, 404 and 429 and ` | retry-after=<seconds>s`
+where Lasso X sends whole seconds, so a host can map it by status. Other
+errors start with `Invalid input for <tool>:`,
+`Unsupported Lasso X gateway tool.`, `Lasso X API responded with a redirect (HTTP <status>)`,
+`Network error calling the Lasso X API`, `Lasso X API request timed out after`,
+`Invalid call context:`, or the policy refusal.
+
+**Key admission and the sink check.** A gateway accepts only a key of
+printable ASCII (0x21-0x7E) of at least 16 characters that shares no piece
+of 6 characters with a string literal in `src/`
+(`src/fixed-corpus.generated.ts`, kept up to date by a test), with the fixed
+fallbacks (`src/fallbacks.ts`) or with the tool list. A refused key throws
+`GatewayConfigError` when the gateway is created, before anything is built
+or sent; the refusal is a fixed text that holds no piece of the key, and
+every error a gateway throws has no `cause` and a `stack` of only
+`name: message`. As the very last step, every output (the tool list, each
+result as a whole, each audit record) is checked in its final form, and one
+that still holds a piece of the key is replaced by a fixed fallback.
+Residual risk: Lasso X echoing the key back otherwise transformed (split into
+pieces shorter than 6 characters, reversed, hashed) is not recognised; such
+data reaches only the tenant whose key it is.
 
 ## Security model
 
@@ -573,13 +691,14 @@ Lassox documents a limit of 500 requests per minute per API key. If Lassox retur
 
 ## Security And Audit
 
-- `LASSO_API_KEY` is read only from the MCP server environment.
+- The MCP server reads `LASSO_API_KEY` only from its environment; an embedded
+  gateway takes the key only from its options (see [Embedding](#embedding-gateway)).
 - API keys are never accepted as tool arguments.
-- Error formatting redacts the configured key by value as well as `lasso-api-key`, `LASSO_API_KEY`, and `apiKey`-style secret material, before error text is truncated. Error bodies are read up to 64 KB and error URLs omit query strings.
+- Errors are our own texts with the HTTP status (`Lasso X API request failed with HTTP <status>`); Lasso X's response bodies (`errorMessage`, `friendlyError`, `errorCode`, `helpLink`) are never read into an error. Error formatting also redacts the configured key by value as well as `lasso-api-key`, `LASSO_API_KEY`, and bearer/`apiKey`-style secret material. A successful answer that is not JSON is refused.
 - CVR data is strictly read-only. The single write tool, `lassox_list_change`, only changes Lassox list membership, is off unless `LASSO_ENABLE_WRITES=true`, is separately allowlisted in the policy module and annotated `readOnlyHint: false`.
 - List reads and changes are restricted to the lists visible to the caller (shared lists plus the caller's own); caller-supplied user ids are not accepted.
 - Caller-supplied identifiers used in URL paths are rejected if they are empty, `.`/`..`, or contain `/`, `\`, `?`, `#` or encoded dots/slashes.
-- If `LASSO_AUDIT_LOG` is set, each tool call writes JSONL audit events with timestamp, request id, tool name, action, target hash, status, and redacted error text. Raw search/entity inputs and API keys are not written to the audit log.
+- If `LASSO_AUDIT_LOG` is set, each tool call writes JSONL audit events with timestamp, request id, tool name, action, target hash, status, and an error code (`http_<status>`, `timeout` or `error`), never the error's text. Raw search/entity inputs and API keys are not written to the audit log.
 - Report suspected vulnerabilities privately to <security@borgels.com>. Do not
   include API keys, personal data, or other secrets in public GitHub issues.
 
