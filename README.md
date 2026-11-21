@@ -665,6 +665,13 @@ errors start with `Invalid input for <tool>:`,
 `Unsupported Lasso X gateway tool.`, `Lasso X API responded with a redirect (HTTP <status>)`,
 `Network error calling the Lasso X API`, `Lasso X API request timed out after`,
 `Invalid call context:`, or the policy refusal.
+An HTTP failure or a refused redirect also has
+`failure: { httpStatus, requestId? }`: the status, and the vendor's request
+id from a response header (`REQUEST_ID_HEADERS` in `src/errors.ts`) only when
+it is a hex id of 8 to 64 characters (one run of hex digits, or groups of
+four or more joined by single hyphens, as in a UUID) and does not hold the
+shape of a personal number, so a host can count failures without reading
+their text. Other errors have none.
 
 **Key admission and the sink check.** A gateway accepts only a key of
 printable ASCII (0x21-0x7E) of at least 16 characters that shares no piece
