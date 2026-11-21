@@ -1,6 +1,6 @@
 {
   "name": "mcp-server-lassox",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "MCP server for the Lassox CVR API.",
   "type": "module",
   "main": "./dist/transports/stdio.js",
@@ -15,6 +15,7 @@
     "dist",
     "README.md",
     "LICENSE",
+    "NOTICE",
     "CHANGELOG.md",
     ".env.example"
   ],
@@ -41,7 +42,7 @@
     "cvr"
   ],
   "author": "",
-  "license": "Apache-2.0",
+  "license": "FSL-1.1-ALv2",
   "engines": {
     "node": ">=20.11"
   },
