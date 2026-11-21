@@ -1,5 +1,5 @@
 import { ConfigError, readEnvInteger } from '../config-env.js';
-import { LassoHttpError, limitDepth } from '../errors.js';
+import { LassoHttpError, limitDepth, RedirectRefusedError, requestIdFrom } from '../errors.js';
 import { describeUrl, discardBody, isRedirect, registerSecret, SecretRedactor } from '../upstream-http.js';
 
 /** Lasso X's production API. */
@@ -123,9 +123,11 @@ export class LassoClient {
     if (response.type === 'opaqueredirect' || isRedirect(response.status)) {
       // The Location is Lasso X's text and is never quoted, and the address is configuration.
       await discardBody(response);
-      throw new Error(
+      throw new RedirectRefusedError(
         `Lasso X API responded with a redirect (HTTP ${response.status}) for ${method}; ` +
           'redirects are not followed, so the key is never sent to another host. Check the configured base URL.',
+        response.status,
+        requestIdFrom(response.headers),
       );
     }
 
@@ -137,6 +139,7 @@ export class LassoClient {
         method,
         url: describeUrl(url),
         retryAfter: response.headers.get('retry-after') ?? undefined,
+        requestId: requestIdFrom(response.headers),
       });
     }
 

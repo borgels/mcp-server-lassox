@@ -30,6 +30,8 @@ export interface LassoHttpErrorInput {
   method?: string;
   url: string;
   retryAfter?: string;
+  /** The request id from the answer's headers (see requestIdFrom); kept only in the form of one. */
+  requestId?: string;
 }
 
 const SECRET_PATTERNS = [
@@ -60,8 +62,9 @@ const STATUS_HINTS: Record<number, string> = {
 };
 
 /**
- * An HTTP error from Lasso X: the status, our own hint and the parsed
- * Retry-After. Nothing of the body is kept.
+ * An HTTP error from Lasso X: the status, our own hint, the parsed
+ * Retry-After and the vendor's request id (only in the form such ids have,
+ * see requestIdFrom). Nothing of the body is kept.
  */
 export class LassoHttpError extends Error {
   readonly status: number;
@@ -70,6 +73,8 @@ export class LassoHttpError extends Error {
   readonly url: string;
   /** Retry-After as whole seconds or an HTTP date; undefined when absent or neither. */
   readonly retryAfter?: string;
+  /** The vendor's own id for the request, when a response header gives one as a UUID or hex id. */
+  readonly requestId?: string;
 
   constructor(input: LassoHttpErrorInput) {
     const seconds = wholeNumber(input.retryAfter);
@@ -87,6 +92,89 @@ export class LassoHttpError extends Error {
     this.method = input.method;
     this.url = stripQuery(input.url);
     this.retryAfter = seconds ?? httpDate(input.retryAfter);
+    this.requestId = vendorRequestId(input.requestId);
+  }
+}
+
+/**
+ * Response headers that carry the vendor's own id for a request, most specific first. Add the vendor's documented
+ * header in front when it has one.
+ */
+export const REQUEST_ID_HEADERS: readonly string[] = [
+  'x-request-id',
+  'request-id',
+  'x-correlation-id',
+  'correlation-id',
+  'x-ms-request-id',
+  'x-amzn-requestid',
+];
+
+/**
+ * A hex id: one run of hex digits, or groups of at least four hex digits joined by single hyphens (a UUID is one),
+ * 8 to 64 characters in all. A name, a sentence or an e-mail address never fits.
+ */
+const REQUEST_ID_FORM = /^[0-9A-Fa-f]{4,}(?:-[0-9A-Fa-f]{4,})*$/;
+/** Six digits and four more: the shape of a Danish personal number. An id that holds it is dropped. */
+const PERSONAL_NUMBER_SHAPE = /\d{6}-?\d{4}/;
+
+/**
+ * The vendor's request id, only in the form such ids have (a UUID or a hex id of 8 to 64 characters), or
+ * undefined. Anything else, and an id that holds the shape of a personal number, is dropped: the value comes from
+ * the vendor and is kept only when it cannot be text.
+ */
+export function vendorRequestId(value: string | null | undefined): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const id = value.trim();
+  return id.length >= 8 && id.length <= 64 && REQUEST_ID_FORM.test(id) && !PERSONAL_NUMBER_SHAPE.test(id) ? id : undefined;
+}
+
+/** The vendor's request id from the first of REQUEST_ID_HEADERS a response has in the right form, or undefined. */
+export function requestIdFrom(headers: Headers, names: readonly string[] = REQUEST_ID_HEADERS): string | undefined {
+  for (const name of names) {
+    const id = vendorRequestId(headers.get(name));
+    if (id !== undefined) return id;
+  }
+  return undefined;
+}
+
+/**
+ * Metadata about a failed call, for a host that counts failures: the HTTP status the upstream API answered with
+ * and its request id. Never the response body, the vendor's error code or message, or the input.
+ */
+export interface FailureMetadata {
+  /** The HTTP status of the upstream API's answer (100-599). */
+  httpStatus: number;
+  /** The vendor's own id for the request, as a UUID or hex id only. */
+  requestId?: string;
+}
+
+/** Failure metadata from a status and a request id: undefined unless the status is 100-599; an id out of form is left out. */
+export function failureFrom(status: unknown, requestId: unknown): FailureMetadata | undefined {
+  if (typeof status !== 'number' || !Number.isInteger(status) || status < 100 || status > 599) return undefined;
+  const id = typeof requestId === 'string' ? vendorRequestId(requestId) : undefined;
+  return id === undefined ? { httpStatus: status } : { httpStatus: status, requestId: id };
+}
+
+/** The failure metadata of an error: an HTTP error from the Lasso X API gives its status and request id. */
+export function failureMetadata(error: unknown): FailureMetadata | undefined {
+  if (!(error instanceof LassoHttpError) && !(error instanceof RedirectRefusedError)) return undefined;
+  return failureFrom(error.status, error.requestId);
+}
+
+/**
+ * A redirect from the upstream API, refused (redirects are never followed). The message is our own text, as before;
+ * the status and the vendor's request id are kept for the failure metadata. Never the Location or the body.
+ */
+export class RedirectRefusedError extends Error {
+  readonly status: number;
+  /** The vendor's own id for the request, when a response header gives one as a UUID or hex id. */
+  readonly requestId?: string;
+
+  constructor(message: string, status: number, requestId?: string) {
+    super(message);
+    this.name = 'RedirectRefusedError';
+    this.status = status;
+    this.requestId = vendorRequestId(requestId);
   }
 }
 
