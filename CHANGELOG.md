@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.8.1
+
+- Licensor and copyright holder corrected to Borgels Services ApS in `LICENSE`,
+  `NOTICE` and `CONTRIBUTING.md`. The license is unchanged (FSL-1.1-ALv2).
+
 ## 0.8.0
 
 - License changed from Apache-2.0 to the Functional Source License, Version 1.1,
